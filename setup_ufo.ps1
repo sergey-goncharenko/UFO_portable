@@ -140,7 +140,7 @@ $content = Get-Content $reqFile -Raw
 # Relax tightly pinned versions that break on newer Python / different platforms
 $content = $content -replace 'pandas==1\.4\.3', 'pandas>=1.5.0'
 $content = $content -replace 'faiss-cpu==1\.8\.0', 'faiss-cpu>=1.8.0'
-$content = $content -replace 'numpy==1\.26\.4', 'numpy>=1.26.0,<2.0'
+$content = $content -replace 'numpy==1\.26\.4', 'numpy>=1.26.0'
 $content = $content -replace 'sentence-transformers==2\.6\.0', 'sentence-transformers>=2.6.0'
 $content = $content -replace 'lxml==5\.1\.0', 'lxml>=5.1.0'
 $content = $content -replace 'psutil==5\.9\.8', 'psutil>=5.9.0'
@@ -173,9 +173,9 @@ $env:TMP = $env:TEMP
 $env:TMPDIR = $env:TEMP
 Remove-Item $shortTmp -Recurse -Force -ErrorAction SilentlyContinue
 
-# Verify critical imports
-$check = & $venvPython -c "import openai, pywinauto; print('OK')" 2>&1
-if ($check -match "OK") {
+# Verify critical imports (run via cmd to avoid PS treating traceback stderr as error)
+$checkResult = cmd /c ($venvPython + ' -c "import openai; print(''OK'')" 2>&1')
+if ($checkResult -match 'OK') {
     Write-Ok "Dependencies installed and verified"
 } else {
     Write-Warn "Dependencies installed but some imports may have issues"

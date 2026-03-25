@@ -166,14 +166,32 @@ $env:TMP = $shortTmp
 
 # Run pip via cmd to prevent PowerShell from treating stderr warnings as errors
 $pipCmd = $venvPip + ' install --only-binary numpy,pandas,lxml,faiss-cpu -r ' + $fixedReq
+Write-Host '    Running pip install (this may take several minutes)...'
 $pipResult = cmd /c "$pipCmd 2>&1"
 $pipExit = $LASTEXITCODE
 $pipResult | ForEach-Object {
     if ($_ -match 'Successfully installed') { Write-Host "    $_" -ForegroundColor Green }
     elseif ($_ -match '^ERROR:') { Write-Host "    $_" -ForegroundColor Red }
 }
+
+# If first attempt failed, retry without --only-binary
 if ($pipExit -ne 0) {
-    Write-Warn ('pip exited with code ' + $pipExit + ' - check output above for real errors')
+    Write-Warn ('pip attempt 1 failed (code ' + $pipExit + '), retrying without --only-binary...')
+    $pipCmd2 = $venvPip + ' install -r ' + $fixedReq
+    $pipResult2 = cmd /c "$pipCmd2 2>&1"
+    $pipExit = $LASTEXITCODE
+    $pipResult2 | ForEach-Object {
+        if ($_ -match 'Successfully installed') { Write-Host "    $_" -ForegroundColor Green }
+        elseif ($_ -match '^ERROR:') { Write-Host "    $_" -ForegroundColor Red }
+    }
+}
+
+if ($pipExit -ne 0) {
+    Write-Host '    ERROR: pip install failed. Check errors above.' -ForegroundColor Red
+    Write-Host '    Try running manually:' -ForegroundColor Red
+    Write-Host ('    ' + $venvPip + ' install -r ' + $fixedReq) -ForegroundColor Red
+    Pop-Location
+    exit 1
 }
 
 # Restore temp dir
@@ -183,11 +201,17 @@ $env:TMPDIR = $env:TEMP
 Remove-Item $shortTmp -Recurse -Force -ErrorAction SilentlyContinue
 
 # Verify critical imports (run via cmd to avoid PS treating traceback stderr as error)
-$checkResult = cmd /c ($venvPython + ' -c "import openai; print(''OK'')" 2>&1')
+$checkResult = cmd /c ($venvPython + ' -c "import colorama, openai, yaml, requests; print(''OK'')" 2>&1')
 if ($checkResult -match 'OK') {
-    Write-Ok "Dependencies installed and verified"
+    Write-Ok "Dependencies installed and verified (colorama, openai, yaml, requests)"
 } else {
-    Write-Warn "Dependencies installed but some imports may have issues"
+    Write-Host '    ERROR: Critical packages missing after install!' -ForegroundColor Red
+    Write-Host '    Output:' -ForegroundColor Red
+    Write-Host "    $checkResult" -ForegroundColor Red
+    Write-Host '    Deleting broken venv so next run starts fresh...' -ForegroundColor Yellow
+    Remove-Item $venvPath -Recurse -Force -ErrorAction SilentlyContinue
+    Pop-Location
+    exit 1
 }
 
 # ──────────────────────────────────────────────────────────────

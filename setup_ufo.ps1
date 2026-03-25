@@ -152,15 +152,15 @@ $env:TMP = $shortTmp
 
 # Helper: run pip install, return exit code
 function Install-PipPackages {
-    param([string]$What, [string]$Args)
-    Write-Host ('    Installing ' + $What + '...') -ForegroundColor DarkGray
-    $result = cmd /c ($venvPip + ' install ' + $Args + ' 2>&1')
+    param([string]$Label, [string]$PipArgs)
+    Write-Host ('    Installing ' + $Label + '...') -ForegroundColor DarkGray
+    $result = cmd /c ($venvPip + ' install ' + $PipArgs + ' 2>&1')
     $code = $LASTEXITCODE
     $result | ForEach-Object {
         if ($_ -match 'Successfully installed') { Write-Host "    $_" -ForegroundColor Green }
     }
     if ($code -ne 0) {
-        Write-Host ('    WARNING: Failed to install ' + $What) -ForegroundColor Yellow
+        Write-Host ('    WARNING: Failed to install ' + $Label) -ForegroundColor Yellow
         $result | ForEach-Object {
             if ($_ -match 'ERROR') { Write-Host "    $_" -ForegroundColor Red }
         }

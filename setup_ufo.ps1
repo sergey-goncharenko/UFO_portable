@@ -116,6 +116,20 @@ if (-not (Test-Path "$venvPath\Scripts\python.exe")) {
 $venvPython = "$venvPath\Scripts\python.exe"
 $venvPip = "$venvPath\Scripts\pip.exe"
 
+Write-Step "Enabling Windows long paths (avoids 260-char path errors)..."
+try {
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem"
+    $current = Get-ItemProperty -Path $regPath -Name LongPathsEnabled -ErrorAction SilentlyContinue
+    if (-not $current -or $current.LongPathsEnabled -ne 1) {
+        Set-ItemProperty -Path $regPath -Name LongPathsEnabled -Value 1
+        Write-Ok "Long paths enabled in registry"
+    } else {
+        Write-Ok "Long paths already enabled"
+    }
+} catch {
+    Write-Warn "Could not enable long paths (needs admin). Continuing with workarounds..."
+}
+
 Write-Step "Upgrading pip..."
 & $venvPython -m pip install --upgrade pip setuptools wheel 2>&1 | Out-Null
 Write-Ok "pip upgraded"
@@ -135,10 +149,24 @@ $content = $content -replace 'psutil==5\.9\.8', 'psutil>=5.9.0'
 $content = $content -replace 'Pillow==11\.3\.0', 'Pillow>=10.0.0'
 $content | Set-Content $fixedReq -Encoding UTF8
 
-& $venvPip install -r $fixedReq 2>&1 | ForEach-Object {
+# Use --only-binary for packages with long source paths that break on Windows
+# Use short temp dir to avoid 260-char path limit
+$shortTmp = "C:\tmp\pip"
+New-Item -ItemType Directory -Path $shortTmp -Force | Out-Null
+$env:TMPDIR = $shortTmp
+$env:TEMP = $shortTmp
+$env:TMP = $shortTmp
+
+& $venvPip install --only-binary numpy,pandas,lxml,faiss-cpu -r $fixedReq 2>&1 | ForEach-Object {
     if ($_ -match "Successfully installed") { Write-Host "    $_" -ForegroundColor Green }
     elseif ($_ -match "ERROR") { Write-Host "    $_" -ForegroundColor Red }
 }
+
+# Restore temp dir
+$env:TEMP = [System.IO.Path]::GetTempPath()
+$env:TMP = $env:TEMP
+$env:TMPDIR = $env:TEMP
+Remove-Item $shortTmp -Recurse -Force -ErrorAction SilentlyContinue
 
 # Verify critical imports
 $check = & $venvPython -c "import openai, pywinauto; print('OK')" 2>&1

@@ -56,7 +56,7 @@ foreach ($cmd in @("python", "python3", "py")) {
 
 if (-not $python) {
     Write-Step "Python 3.10+ not found. Installing Python $PythonVersion..."
-    $installer = "$env:TEMP\python-installer.exe"
+    $installer = Join-Path $env:TEMP 'python-installer.exe'
     $url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
     
     Write-Host "    Downloading from $url ..."
@@ -82,7 +82,7 @@ if (-not $python) {
 # ──────────────────────────────────────────────────────────────
 Write-Step "Setting up UFO repository in $InstallDir..."
 
-if (Test-Path "$InstallDir\.git") {
+if (Test-Path (Join-Path $InstallDir '.git')) {
     Write-Host "    Repository exists, pulling latest..."
     Push-Location $InstallDir
     git pull --ff-only
@@ -102,17 +102,17 @@ if (Test-Path "$InstallDir\.git") {
 Write-Step "Creating Python virtual environment..."
 
 Push-Location $InstallDir
-$venvPath = "$InstallDir\.venv"
+$venvPath = Join-Path $InstallDir '.venv'
 
-if (-not (Test-Path "$venvPath\Scripts\python.exe")) {
+if (-not (Test-Path (Join-Path $venvPath 'Scripts\python.exe'))) {
     & $python -m venv $venvPath
     Write-Ok "Created .venv"
 } else {
     Write-Ok ".venv already exists"
 }
 
-$venvPython = "$venvPath\Scripts\python.exe"
-$venvPip = "$venvPath\Scripts\pip.exe"
+$venvPython = Join-Path $venvPath 'Scripts\python.exe'
+$venvPip = Join-Path $venvPath 'Scripts\pip.exe'
 
 Write-Step "Enabling Windows long paths (avoids 260-char path errors)..."
 try {
@@ -134,8 +134,8 @@ Write-Ok "pip upgraded"
 
 Write-Step "Installing dependencies (this may take a few minutes)..."
 # Fix known version incompatibilities in UFO's pinned requirements
-$reqFile = "$InstallDir\requirements.txt"
-$fixedReq = "$InstallDir\requirements_vm.txt"
+$reqFile = Join-Path $InstallDir 'requirements.txt'
+$fixedReq = Join-Path $InstallDir 'requirements_vm.txt'
 $content = Get-Content $reqFile -Raw
 # Relax tightly pinned versions that break on newer Python / different platforms
 $content = $content -replace 'pandas==1\.4\.3', 'pandas>=1.5.0'
@@ -149,22 +149,22 @@ $content | Set-Content $fixedReq -Encoding UTF8
 
 # Use --only-binary for packages with long source paths that break on Windows
 # Use short temp dir to avoid 260-char path limit
-$shortTmp = "C:\tmp\pip"
+$shortTmp = 'C:\tmp\pip'
 New-Item -ItemType Directory -Path $shortTmp -Force | Out-Null
 $env:TMPDIR = $shortTmp
 $env:TEMP = $shortTmp
 $env:TMP = $shortTmp
 
 # Run pip via cmd to prevent PowerShell from treating stderr warnings as errors
-$pipArgs = "install --only-binary numpy,pandas,lxml,faiss-cpu -r `"$fixedReq`""
-$pipResult = cmd /c "`"$venvPip`" $pipArgs 2>&1"
+$pipCmd = $venvPip + ' install --only-binary numpy,pandas,lxml,faiss-cpu -r ' + $fixedReq
+$pipResult = cmd /c "$pipCmd 2>&1"
 $pipExit = $LASTEXITCODE
 $pipResult | ForEach-Object {
-    if ($_ -match "Successfully installed") { Write-Host "    $_" -ForegroundColor Green }
-    elseif ($_ -match "^ERROR:") { Write-Host "    $_" -ForegroundColor Red }
+    if ($_ -match 'Successfully installed') { Write-Host "    $_" -ForegroundColor Green }
+    elseif ($_ -match '^ERROR:') { Write-Host "    $_" -ForegroundColor Red }
 }
 if ($pipExit -ne 0) {
-    Write-Warn "pip exited with code $pipExit — check output above for real errors"
+    Write-Warn ('pip exited with code ' + $pipExit + ' - check output above for real errors')
 }
 
 # Restore temp dir
@@ -197,9 +197,10 @@ if (-not $ApiKey) {
     }
 }
 
-$configDir = "$InstallDir\config\ufo"
-$configFile = "$configDir\agents.yaml"
-Copy-Item "$configDir\agents.yaml.template" $configFile -Force
+$configDir = Join-Path $InstallDir 'config\ufo'
+$configFile = Join-Path $configDir 'agents.yaml'
+$configTemplate = Join-Path $configDir 'agents.yaml.template'
+Copy-Item $configTemplate $configFile -Force
 
 # Replace placeholder keys and fix API_BASE
 $content = Get-Content $configFile -Raw
@@ -224,7 +225,8 @@ $lines += "@echo off"
 $lines += "title UFO2 Desktop AgentOS"
 $lines += "cd /d ${q}${InstallDir}${q}"
 $lines += "${q}${venvPath}\Scripts\python.exe${q} -m ufo --task demo %*"
-[IO.File]::WriteAllLines("$InstallDir\ufo_interactive.bat", $lines)
+$batPath = Join-Path $InstallDir 'ufo_interactive.bat'
+[IO.File]::WriteAllLines($batPath, $lines)
 
 # One-shot launcher
 $lines = @()
@@ -232,20 +234,23 @@ $lines += "@echo off"
 $lines += "title UFO2 - Running Task"
 $lines += "cd /d ${q}${InstallDir}${q}"
 $lines += "${q}${venvPath}\Scripts\python.exe${q} -m ufo --task demo_%RANDOM% -r %*"
-[IO.File]::WriteAllLines("$InstallDir\ufo_run.bat", $lines)
+$batPath = Join-Path $InstallDir 'ufo_run.bat'
+[IO.File]::WriteAllLines($batPath, $lines)
 
 # Desktop shortcuts
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shell = New-Object -ComObject WScript.Shell
 
-$shortcut = $shell.CreateShortcut("$desktop\UFO2 Interactive.lnk")
-$shortcut.TargetPath = "$InstallDir\ufo_interactive.bat"
+$lnkPath = Join-Path $desktop 'UFO2 Interactive.lnk'
+$shortcut = $shell.CreateShortcut($lnkPath)
+$shortcut.TargetPath = Join-Path $InstallDir 'ufo_interactive.bat'
 $shortcut.WorkingDirectory = $InstallDir
 $shortcut.IconLocation = "shell32.dll,12"
 $shortcut.Description = "Launch UFO2 in interactive mode"
 $shortcut.Save()
 
-$shortcut = $shell.CreateShortcut("$desktop\UFO2 Folder.lnk")
+$lnkPath = Join-Path $desktop 'UFO2 Folder.lnk'
+$shortcut = $shell.CreateShortcut($lnkPath)
 $shortcut.TargetPath = $InstallDir
 $shortcut.Description = "Open UFO2 installation folder"
 $shortcut.Save()
@@ -257,19 +262,19 @@ Pop-Location
 # ──────────────────────────────────────────────────────────────
 # Done!
 # ──────────────────────────────────────────────────────────────
-Write-Host "" -ForegroundColor Green
-Write-Host "  ============================================" -ForegroundColor Green
-Write-Host "   UFO2 is ready!" -ForegroundColor Green
-Write-Host "  ============================================" -ForegroundColor Green
-Write-Host "" -ForegroundColor Green
-Write-Host "  Quick start:" -ForegroundColor Green
-Write-Host "    Double-click UFO2 Interactive on Desktop" -ForegroundColor Green
-Write-Host "" -ForegroundColor Green
-Write-Host "  Or from terminal:" -ForegroundColor Green
-Write-Host "    cd $InstallDir" -ForegroundColor Green
-Write-Host "    .\ufo_interactive.bat" -ForegroundColor Green
-Write-Host "    .\ufo_run.bat Open Notepad and type Hello World" -ForegroundColor Green
-Write-Host "" -ForegroundColor Green
-Write-Host "  Logs saved to: $InstallDir\logs" -ForegroundColor Green
-Write-Host "  ============================================" -ForegroundColor Green
-Write-Host ""
+Write-Host '' -ForegroundColor Green
+Write-Host '  ============================================' -ForegroundColor Green
+Write-Host '   UFO2 is ready!' -ForegroundColor Green
+Write-Host '  ============================================' -ForegroundColor Green
+Write-Host '' -ForegroundColor Green
+Write-Host '  Quick start:' -ForegroundColor Green
+Write-Host '    Double-click UFO2 Interactive on Desktop' -ForegroundColor Green
+Write-Host '' -ForegroundColor Green
+Write-Host '  Or from terminal:' -ForegroundColor Green
+Write-Host ('    cd ' + $InstallDir) -ForegroundColor Green
+Write-Host '    .\ufo_interactive.bat' -ForegroundColor Green
+Write-Host '    .\ufo_run.bat Open Notepad and type Hello World' -ForegroundColor Green
+Write-Host '' -ForegroundColor Green
+Write-Host ('  Logs saved to: ' + $InstallDir + '\logs') -ForegroundColor Green
+Write-Host '  ============================================' -ForegroundColor Green
+Write-Host ''

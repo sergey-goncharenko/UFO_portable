@@ -27,14 +27,14 @@ function Write-Ok($msg)   { Write-Host "    OK: $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "    WARN: $msg" -ForegroundColor Yellow }
 
 Write-Host ""
-Write-Host "  _   _  _____   ___   ____" -ForegroundColor Magenta
-Write-Host " | | | ||  ___| / _ \ |___ \" -ForegroundColor Magenta
-Write-Host " | | | || |_   | | | |  __) |" -ForegroundColor Magenta
-Write-Host " | |_| ||  _|  | |_| | / __/" -ForegroundColor Magenta
-Write-Host "  \___/ |_|     \___/ |_____|" -ForegroundColor Magenta
-Write-Host "" -ForegroundColor Magenta
-Write-Host "  UFO2 Desktop AgentOS - VM Setup" -ForegroundColor Magenta
-Write-Host "  ================================" -ForegroundColor Magenta
+Write-Host '  _   _  _____   ___   ____' -ForegroundColor Magenta
+Write-Host ' | | | ||  ___| / _ \ |___ \' -ForegroundColor Magenta
+Write-Host ' | | | || |_   | | | |  __) |' -ForegroundColor Magenta
+Write-Host ' | |_| ||  _|  | |_| | / __/' -ForegroundColor Magenta
+Write-Host '  \___/ |_|     \___/ |_____|' -ForegroundColor Magenta
+Write-Host '' -ForegroundColor Magenta
+Write-Host '  UFO2 Desktop AgentOS - VM Setup' -ForegroundColor Magenta
+Write-Host '  ================================' -ForegroundColor Magenta
 Write-Host ""
 
 # ──────────────────────────────────────────────────────────────
@@ -270,6 +270,6 @@ Write-Host "    cd $InstallDir" -ForegroundColor Green
 Write-Host "    .\ufo_interactive.bat" -ForegroundColor Green
 Write-Host "    .\ufo_run.bat Open Notepad and type Hello World" -ForegroundColor Green
 Write-Host "" -ForegroundColor Green
-Write-Host "  Logs saved to: $InstallDir\logs\" -ForegroundColor Green
+Write-Host "  Logs saved to: $InstallDir\logs" -ForegroundColor Green
 Write-Host "  ============================================" -ForegroundColor Green
 Write-Host ""

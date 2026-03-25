@@ -103,16 +103,25 @@ Write-Step "Creating Python virtual environment..."
 
 Push-Location $InstallDir
 $venvPath = Join-Path $InstallDir '.venv'
-
-if (-not (Test-Path (Join-Path $venvPath 'Scripts\python.exe'))) {
-    & $python -m venv $venvPath
-    Write-Ok "Created .venv"
-} else {
-    Write-Ok ".venv already exists"
-}
-
 $venvPython = Join-Path $venvPath 'Scripts\python.exe'
 $venvPip = Join-Path $venvPath 'Scripts\pip.exe'
+
+# If venv exists but is broken (missing critical packages), recreate it
+$needsCreate = $true
+if (Test-Path $venvPython) {
+    $testImport = cmd /c ($venvPython + ' -c "import pip; print(''OK'')" 2>&1')
+    if ($testImport -match 'OK') {
+        Write-Ok ".venv already exists and works"
+        $needsCreate = $false
+    } else {
+        Write-Warn ".venv is broken, recreating..."
+        Remove-Item $venvPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+if ($needsCreate) {
+    & $python -m venv $venvPath
+    Write-Ok "Created .venv"
+}
 
 Write-Step "Enabling Windows long paths (avoids 260-char path errors)..."
 try {

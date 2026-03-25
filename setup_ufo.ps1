@@ -217,28 +217,20 @@ Write-Ok "Config written to $configFile"
 # ──────────────────────────────────────────────────────────────
 Write-Step "Creating launcher scripts..."
 
-# Interactive launcher
-$batLines = @(
-    "@echo off",
-    "title UFO2 Desktop AgentOS",
-    "cd /d `"$InstallDir`"",
-    "`"$venvPath\Scripts\python.exe`" -m ufo --task demo %*"
-)
-$batLines | Set-Content "$InstallDir\ufo_interactive.bat" -Encoding ASCII
+# Interactive launcher (write bat content without any PowerShell quote escaping issues)
+$q = '"'
+$interactiveBat = "@echo off`r`ntitle UFO2 Desktop AgentOS`r`ncd /d ${q}${InstallDir}${q}`r`n${q}${venvPath}\Scripts\python.exe${q} -m ufo --task demo %*"
+[IO.File]::WriteAllText("$InstallDir\ufo_interactive.bat", $interactiveBat)
 
 # One-shot launcher
-$batLines = @(
-    "@echo off",
-    "title UFO2 - Running Task",
-    "cd /d `"$InstallDir`"",
-    "if `"%~1`"==`"`" (",
-    "    echo Usage: ufo_run.bat `"your natural language command here`"",
-    "    echo Example: ufo_run.bat `"Open Notepad and type Hello World`"",
-    "    exit /b 1",
-    ")",
-    "`"$venvPath\Scripts\python.exe`" -m ufo --task demo_%RANDOM% -r %*"
-)
-$batLines | Set-Content "$InstallDir\ufo_run.bat" -Encoding ASCII
+$runBat = "@echo off`r`ntitle UFO2 - Running Task`r`ncd /d ${q}${InstallDir}${q}`r`n"
+$runBat += "if ${q}%~1${q}==${q}${q} (`r`n"
+$runBat += "    echo Usage: ufo_run.bat ${q}your natural language command here${q}`r`n"
+$runBat += "    echo Example: ufo_run.bat ${q}Open Notepad and type Hello World${q}`r`n"
+$runBat += "    exit /b 1`r`n"
+$runBat += ")`r`n"
+$runBat += "${q}${venvPath}\Scripts\python.exe${q} -m ufo --task demo_%RANDOM% -r %*"
+[IO.File]::WriteAllText("$InstallDir\ufo_run.bat", $runBat)
 
 # Desktop shortcuts
 $desktop = [Environment]::GetFolderPath("Desktop")

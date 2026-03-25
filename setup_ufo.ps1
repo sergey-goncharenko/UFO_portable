@@ -218,25 +218,27 @@ Write-Ok "Config written to $configFile"
 Write-Step "Creating launcher scripts..."
 
 # Interactive launcher
-@"
-@echo off
-title UFO2 Desktop AgentOS
-cd /d "$InstallDir"
-"$venvPath\Scripts\python.exe" -m ufo --task demo %*
-"@ | Set-Content "$InstallDir\ufo_interactive.bat" -Encoding ASCII
-
-# One-shot launcher  
-@"
-@echo off
-title UFO2 - Running Task
-cd /d "$InstallDir"
-if "%~1"=="" (
-    echo Usage: ufo_run.bat "your natural language command here"
-    echo Example: ufo_run.bat "Open Notepad and type Hello World"
-    exit /b 1
+$batLines = @(
+    "@echo off",
+    "title UFO2 Desktop AgentOS",
+    "cd /d `"$InstallDir`"",
+    "`"$venvPath\Scripts\python.exe`" -m ufo --task demo %*"
 )
-"$venvPath\Scripts\python.exe" -m ufo --task demo_%RANDOM% -r %*
-"@ | Set-Content "$InstallDir\ufo_run.bat" -Encoding ASCII
+$batLines | Set-Content "$InstallDir\ufo_interactive.bat" -Encoding ASCII
+
+# One-shot launcher
+$batLines = @(
+    "@echo off",
+    "title UFO2 - Running Task",
+    "cd /d `"$InstallDir`"",
+    "if `"%~1`"==`"`" (",
+    "    echo Usage: ufo_run.bat `"your natural language command here`"",
+    "    echo Example: ufo_run.bat `"Open Notepad and type Hello World`"",
+    "    exit /b 1",
+    ")",
+    "`"$venvPath\Scripts\python.exe`" -m ufo --task demo_%RANDOM% -r %*"
+)
+$batLines | Set-Content "$InstallDir\ufo_run.bat" -Encoding ASCII
 
 # Desktop shortcuts
 $desktop = [Environment]::GetFolderPath("Desktop")

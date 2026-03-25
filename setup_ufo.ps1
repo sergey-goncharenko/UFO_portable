@@ -168,8 +168,8 @@ function Install-PipPackages {
     return $code
 }
 
-# Stage 1: Core packages that must succeed (all have pre-built wheels)
-$corePackages = 'colorama PyYAML requests openai Pillow pywin32 pywinauto psutil beautifulsoup4 rich art protobuf'
+# Stage 1: Core packages that UFO imports at startup (must succeed)
+$corePackages = 'colorama PyYAML requests openai Pillow pywin32 pywinauto psutil beautifulsoup4 rich art protobuf msal pyautogui uiautomation comtypes'
 $code = Install-PipPackages 'core packages' ('--prefer-binary ' + $corePackages)
 if ($code -ne 0) {
     Write-Host '    ERROR: Core packages failed to install. Cannot continue.' -ForegroundColor Red
@@ -177,15 +177,19 @@ if ($code -ne 0) {
     exit 1
 }
 
-# Stage 2: Scientific/ML packages (may need binary-only)
+# Stage 2: Web framework and MCP packages (required for UFO startup)
+$webPackages = 'flask fastapi fastmcp uvicorn websockets pydantic anthropic html2text PyPDF2 pyperclip jsonschema gradio_client azure-identity azure-identity-broker azure-storage-blob'
+Install-PipPackages 'web/MCP packages' ('--prefer-binary ' + $webPackages) | Out-Null
+
+# Stage 3: Scientific/ML packages (may need binary-only)
 $mlPackages = 'numpy pandas faiss-cpu lxml matplotlib'
 Install-PipPackages 'scientific packages' ('--prefer-binary --only-binary numpy,pandas,lxml,faiss-cpu ' + $mlPackages) | Out-Null
 
-# Stage 3: LLM/AI packages
+# Stage 4: LLM/AI packages
 $aiPackages = 'langchain langchain_community langchain_huggingface sentence-transformers'
 Install-PipPackages 'AI/LLM packages' ('--prefer-binary ' + $aiPackages) | Out-Null
 
-# Stage 4: Remaining packages from requirements (catches anything we missed)
+# Stage 5: Remaining packages from requirements (catches anything we missed)
 $reqFile = Join-Path $InstallDir 'requirements.txt'
 $fixedReq = Join-Path $InstallDir 'requirements_vm.txt'
 $content = Get-Content $reqFile -Raw
@@ -212,7 +216,7 @@ $env:TMPDIR = $env:TEMP
 Remove-Item $shortTmp -Recurse -Force -ErrorAction SilentlyContinue
 
 # Verify critical imports (run via cmd to avoid PS treating traceback stderr as error)
-$checkResult = cmd /c ($venvPython + ' -c "import colorama, openai, yaml, requests; print(''OK'')" 2>&1')
+$checkResult = cmd /c ($venvPython + ' -c "import colorama, openai, yaml, requests, fastmcp; print(''OK'')" 2>&1')
 if ($checkResult -match 'OK') {
     Write-Ok "Dependencies installed and verified (colorama, openai, yaml, requests)"
 } else {

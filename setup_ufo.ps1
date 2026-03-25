@@ -157,9 +157,16 @@ $env:TMPDIR = $shortTmp
 $env:TEMP = $shortTmp
 $env:TMP = $shortTmp
 
-& $venvPip install --only-binary numpy,pandas,lxml,faiss-cpu -r $fixedReq 2>&1 | ForEach-Object {
+# Run pip via cmd to prevent PowerShell from treating stderr warnings as errors
+$pipArgs = "install --only-binary numpy,pandas,lxml,faiss-cpu -r `"$fixedReq`""
+$pipResult = cmd /c "`"$venvPip`" $pipArgs 2>&1"
+$pipExit = $LASTEXITCODE
+$pipResult | ForEach-Object {
     if ($_ -match "Successfully installed") { Write-Host "    $_" -ForegroundColor Green }
-    elseif ($_ -match "ERROR") { Write-Host "    $_" -ForegroundColor Red }
+    elseif ($_ -match "^ERROR:") { Write-Host "    $_" -ForegroundColor Red }
+}
+if ($pipExit -ne 0) {
+    Write-Warn "pip exited with code $pipExit — check output above for real errors"
 }
 
 # Restore temp dir

@@ -121,16 +121,32 @@ Write-Step "Upgrading pip..."
 Write-Ok "pip upgraded"
 
 Write-Step "Installing dependencies (this may take a few minutes)..."
-# Fix known incompatibility: pandas 1.4.3 doesn't build on Python 3.11+
+# Fix known version incompatibilities in UFO's pinned requirements
 $reqFile = "$InstallDir\requirements.txt"
 $fixedReq = "$InstallDir\requirements_vm.txt"
-(Get-Content $reqFile) -replace 'pandas==1\.4\.3', 'pandas>=1.5.0' | Set-Content $fixedReq
+$content = Get-Content $reqFile -Raw
+# Relax tightly pinned versions that break on newer Python / different platforms
+$content = $content -replace 'pandas==1\.4\.3', 'pandas>=1.5.0'
+$content = $content -replace 'faiss-cpu==1\.8\.0', 'faiss-cpu>=1.8.0'
+$content = $content -replace 'numpy==1\.26\.4', 'numpy>=1.26.0,<2.0'
+$content = $content -replace 'sentence-transformers==2\.6\.0', 'sentence-transformers>=2.6.0'
+$content = $content -replace 'lxml==5\.1\.0', 'lxml>=5.1.0'
+$content = $content -replace 'psutil==5\.9\.8', 'psutil>=5.9.0'
+$content = $content -replace 'Pillow==11\.3\.0', 'Pillow>=10.0.0'
+$content | Set-Content $fixedReq -Encoding UTF8
 
 & $venvPip install -r $fixedReq 2>&1 | ForEach-Object {
     if ($_ -match "Successfully installed") { Write-Host "    $_" -ForegroundColor Green }
     elseif ($_ -match "ERROR") { Write-Host "    $_" -ForegroundColor Red }
 }
-Write-Ok "Dependencies installed"
+
+# Verify critical imports
+$check = & $venvPython -c "import openai, pywinauto; print('OK')" 2>&1
+if ($check -match "OK") {
+    Write-Ok "Dependencies installed and verified"
+} else {
+    Write-Warn "Dependencies installed but some imports may have issues"
+}
 
 # ──────────────────────────────────────────────────────────────
 # 4. Configure API key

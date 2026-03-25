@@ -26,18 +26,16 @@ function Write-Step($msg) { Write-Host "`n[*] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    OK: $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "    WARN: $msg" -ForegroundColor Yellow }
 
-Write-Host @"
-
-  _   _  _____   ___   ____
- | | | ||  ___| / _ \ |___ \
- | | | || |_   | | | |  __) |
- | |_| ||  _|  | |_| | / __/
-  \___/ |_|     \___/ |_____|
-  
-  UFO2 Desktop AgentOS - VM Setup
-  ================================
-
-"@ -ForegroundColor Magenta
+Write-Host ""
+Write-Host "  _   _  _____   ___   ____" -ForegroundColor Magenta
+Write-Host " | | | ||  ___| / _ \ |___ \" -ForegroundColor Magenta
+Write-Host " | | | || |_   | | | |  __) |" -ForegroundColor Magenta
+Write-Host " | |_| ||  _|  | |_| | / __/" -ForegroundColor Magenta
+Write-Host "  \___/ |_|     \___/ |_____|" -ForegroundColor Magenta
+Write-Host "" -ForegroundColor Magenta
+Write-Host "  UFO2 Desktop AgentOS - VM Setup" -ForegroundColor Magenta
+Write-Host "  ================================" -ForegroundColor Magenta
+Write-Host ""
 
 # ──────────────────────────────────────────────────────────────
 # 1. Check / Install Python
@@ -259,21 +257,19 @@ Pop-Location
 # ──────────────────────────────────────────────────────────────
 # Done!
 # ──────────────────────────────────────────────────────────────
-Write-Host @"
-
-  ============================================
-   UFO2 is ready!
-  ============================================
-  
-  Quick start:
-    Double-click "UFO2 Interactive" on Desktop
-    
-  Or from terminal:
-    cd $InstallDir
-    .\ufo_interactive.bat
-    .\ufo_run.bat "Open Notepad and type Hello World"
-    
-  Logs saved to: $InstallDir\logs\
-  ============================================
-
-"@ -ForegroundColor Green
+Write-Host "" -ForegroundColor Green
+Write-Host "  ============================================" -ForegroundColor Green
+Write-Host "   UFO2 is ready!" -ForegroundColor Green
+Write-Host "  ============================================" -ForegroundColor Green
+Write-Host "" -ForegroundColor Green
+Write-Host "  Quick start:" -ForegroundColor Green
+Write-Host "    Double-click UFO2 Interactive on Desktop" -ForegroundColor Green
+Write-Host "" -ForegroundColor Green
+Write-Host "  Or from terminal:" -ForegroundColor Green
+Write-Host "    cd $InstallDir" -ForegroundColor Green
+Write-Host "    .\ufo_interactive.bat" -ForegroundColor Green
+Write-Host "    .\ufo_run.bat Open Notepad and type Hello World" -ForegroundColor Green
+Write-Host "" -ForegroundColor Green
+Write-Host "  Logs saved to: $InstallDir\logs\" -ForegroundColor Green
+Write-Host "  ============================================" -ForegroundColor Green
+Write-Host ""

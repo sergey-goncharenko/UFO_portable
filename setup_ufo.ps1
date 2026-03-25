@@ -138,15 +138,58 @@ try {
 }
 
 Write-Step "Upgrading pip..."
-& $venvPython -m pip install --upgrade pip setuptools wheel 2>&1 | Out-Null
+cmd /c ($venvPython + ' -m pip install --upgrade pip setuptools wheel 2>&1') | Out-Null
 Write-Ok "pip upgraded"
 
-Write-Step "Installing dependencies (this may take a few minutes)..."
-# Fix known version incompatibilities in UFO's pinned requirements
+Write-Step "Installing dependencies (this may take several minutes)..."
+
+# Use short temp dir to avoid 260-char path limit
+$shortTmp = 'C:\tmp\pip'
+New-Item -ItemType Directory -Path $shortTmp -Force | Out-Null
+$env:TMPDIR = $shortTmp
+$env:TEMP = $shortTmp
+$env:TMP = $shortTmp
+
+# Helper: run pip install, return exit code
+function Install-PipPackages {
+    param([string]$What, [string]$Args)
+    Write-Host ('    Installing ' + $What + '...') -ForegroundColor DarkGray
+    $result = cmd /c ($venvPip + ' install ' + $Args + ' 2>&1')
+    $code = $LASTEXITCODE
+    $result | ForEach-Object {
+        if ($_ -match 'Successfully installed') { Write-Host "    $_" -ForegroundColor Green }
+    }
+    if ($code -ne 0) {
+        Write-Host ('    WARNING: Failed to install ' + $What) -ForegroundColor Yellow
+        $result | ForEach-Object {
+            if ($_ -match 'ERROR') { Write-Host "    $_" -ForegroundColor Red }
+        }
+    }
+    return $code
+}
+
+# Stage 1: Core packages that must succeed (all have pre-built wheels)
+$corePackages = 'colorama PyYAML requests openai Pillow pywin32 pywinauto psutil beautifulsoup4 rich art protobuf'
+$code = Install-PipPackages 'core packages' ('--prefer-binary ' + $corePackages)
+if ($code -ne 0) {
+    Write-Host '    ERROR: Core packages failed to install. Cannot continue.' -ForegroundColor Red
+    Pop-Location
+    exit 1
+}
+
+# Stage 2: Scientific/ML packages (may need binary-only)
+$mlPackages = 'numpy pandas faiss-cpu lxml matplotlib'
+Install-PipPackages 'scientific packages' ('--prefer-binary --only-binary numpy,pandas,lxml,faiss-cpu ' + $mlPackages) | Out-Null
+
+# Stage 3: LLM/AI packages
+$aiPackages = 'langchain langchain_community langchain_huggingface sentence-transformers'
+Install-PipPackages 'AI/LLM packages' ('--prefer-binary ' + $aiPackages) | Out-Null
+
+# Stage 4: Remaining packages from requirements (catches anything we missed)
 $reqFile = Join-Path $InstallDir 'requirements.txt'
 $fixedReq = Join-Path $InstallDir 'requirements_vm.txt'
 $content = Get-Content $reqFile -Raw
-# Relax tightly pinned versions that break on newer Python / different platforms
+# Relax pinned versions
 $content = $content -replace 'pandas==1\.4\.3', 'pandas>=1.5.0'
 $content = $content -replace 'faiss-cpu==1\.8\.0', 'faiss-cpu>=1.8.0'
 $content = $content -replace 'numpy==1\.26\.4', 'numpy>=1.26.0'
@@ -156,42 +199,10 @@ $content = $content -replace 'psutil==5\.9\.8', 'psutil>=5.9.0'
 $content = $content -replace 'Pillow==11\.3\.0', 'Pillow>=10.0.0'
 $content | Set-Content $fixedReq -Encoding UTF8
 
-# Use --only-binary for packages with long source paths that break on Windows
-# Use short temp dir to avoid 260-char path limit
-$shortTmp = 'C:\tmp\pip'
-New-Item -ItemType Directory -Path $shortTmp -Force | Out-Null
-$env:TMPDIR = $shortTmp
-$env:TEMP = $shortTmp
-$env:TMP = $shortTmp
-
-# Run pip via cmd to prevent PowerShell from treating stderr warnings as errors
-$pipCmd = $venvPip + ' install --only-binary numpy,pandas,lxml,faiss-cpu -r ' + $fixedReq
-Write-Host '    Running pip install (this may take several minutes)...'
-$pipResult = cmd /c "$pipCmd 2>&1"
-$pipExit = $LASTEXITCODE
+Write-Host '    Installing remaining requirements...' -ForegroundColor DarkGray
+$pipResult = cmd /c ($venvPip + ' install --prefer-binary -r ' + $fixedReq + ' 2>&1')
 $pipResult | ForEach-Object {
     if ($_ -match 'Successfully installed') { Write-Host "    $_" -ForegroundColor Green }
-    elseif ($_ -match '^ERROR:') { Write-Host "    $_" -ForegroundColor Red }
-}
-
-# If first attempt failed, retry without --only-binary
-if ($pipExit -ne 0) {
-    Write-Warn ('pip attempt 1 failed (code ' + $pipExit + '), retrying without --only-binary...')
-    $pipCmd2 = $venvPip + ' install -r ' + $fixedReq
-    $pipResult2 = cmd /c "$pipCmd2 2>&1"
-    $pipExit = $LASTEXITCODE
-    $pipResult2 | ForEach-Object {
-        if ($_ -match 'Successfully installed') { Write-Host "    $_" -ForegroundColor Green }
-        elseif ($_ -match '^ERROR:') { Write-Host "    $_" -ForegroundColor Red }
-    }
-}
-
-if ($pipExit -ne 0) {
-    Write-Host '    ERROR: pip install failed. Check errors above.' -ForegroundColor Red
-    Write-Host '    Try running manually:' -ForegroundColor Red
-    Write-Host ('    ' + $venvPip + ' install -r ' + $fixedReq) -ForegroundColor Red
-    Pop-Location
-    exit 1
 }
 
 # Restore temp dir

@@ -42,27 +42,31 @@ Write-Host ""
 # ──────────────────────────────────────────────────────────────
 Write-Step "Checking Python installation..."
 
+# UFO requires Python 3.10-3.12. Python 3.13+ breaks langchain/pydantic v1.
 $python = $null
 foreach ($cmd in @("python", "python3", "py")) {
     try {
         $ver = & $cmd --version 2>&1
-        if ($ver -match "Python 3\.(1[0-9]|[2-9]\d)") {
+        if ($ver -match 'Python 3\.(1[0-2])\.\d+') {
             $python = $cmd
-            Write-Ok "Found $ver ($cmd)"
+            Write-Ok "Found $ver ($cmd) - compatible"
             break
+        }
+        elseif ($ver -match 'Python 3\.(1[3-9]|[2-9]\d)') {
+            Write-Warn "Found $ver but UFO requires Python 3.10-3.12 (3.13+ breaks langchain)"
         }
     } catch {}
 }
 
 if (-not $python) {
-    Write-Step "Python 3.10+ not found. Installing Python $PythonVersion..."
+    Write-Step "Compatible Python (3.10-3.12) not found. Installing Python $PythonVersion..."
     $installer = Join-Path $env:TEMP 'python-installer.exe'
     $url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
     
     Write-Host "    Downloading from $url ..."
     Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
     
-    Write-Host "    Installing (silent)..."
+    Write-Host "    Installing (silent, will coexist with existing Python)..."
     Start-Process -FilePath $installer -ArgumentList `
         "/quiet", "InstallAllUsers=1", "PrependPath=1", `
         "Include_pip=1", "Include_test=0" -Wait -NoNewWindow
@@ -71,7 +75,39 @@ if (-not $python) {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
     
-    $python = "python"
+    # After install, find the specific 3.11 binary
+    $python = $null
+    foreach ($cmd in @("python", "python3", "py")) {
+        try {
+            $ver = & $cmd --version 2>&1
+            if ($ver -match 'Python 3\.(1[0-2])\.\d+') {
+                $python = $cmd
+                break
+            }
+        } catch {}
+    }
+    
+    # If PATH still points to 3.14, find 3.11 directly
+    if (-not $python) {
+        $directPaths = @(
+            'C:\Python311\python.exe',
+            'C:\Program Files\Python311\python.exe',
+            (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe')
+        )
+        foreach ($p in $directPaths) {
+            if (Test-Path $p) {
+                $python = $p
+                break
+            }
+        }
+    }
+    
+    if (-not $python) {
+        Write-Host '    ERROR: Could not find Python 3.11 after installation.' -ForegroundColor Red
+        Write-Host '    Please install Python 3.11 manually from https://www.python.org/downloads/release/python-3119/' -ForegroundColor Red
+        exit 1
+    }
+    
     $ver = & $python --version 2>&1
     Write-Ok "Installed $ver"
     Remove-Item $installer -Force -ErrorAction SilentlyContinue

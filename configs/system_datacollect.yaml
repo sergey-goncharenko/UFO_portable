@@ -1,0 +1,92 @@
+# UFO2 Data Collection Config — Maximum capture for fine-tuning research
+# Use this to generate training data: (screenshot, ui_tree, action) tuples
+
+# LLM Parameters
+MAX_TOKENS: 2000
+MAX_RETRY: 3
+TEMPERATURE: 0.0
+TOP_P: 0.0
+TIMEOUT: 120
+
+# Control Backend
+CONTROL_BACKEND: ["uia"]
+IOU_THRESHOLD_FOR_MERGE: 0.1
+
+# Execution Limits
+MAX_STEP: 15          # Cap steps to avoid runaway loops burning API credits
+MAX_ROUND: 1
+SLEEP_TIME: 1         # Full second — ensure UI is stable for clean screenshots
+RECTANGLE_TIME: 0     # No visual overlay — keep screenshots clean for training data
+
+# Action Configuration
+ACTION_SEQUENCE: False  # Single actions — cleaner training signal per step
+SHOW_VISUAL_OUTLINE_ON_SCREEN: False  # No overlay artifacts in screenshots
+MAXIMIZE_WINDOW: False
+JSON_PARSING_RETRY: 3
+
+# Safety
+SAFE_GUARD: True
+CONTROL_LIST: ["Button", "Edit", "TabItem", "Document", "ListItem", "MenuItem", "ScrollBar", "TreeItem", "Hyperlink", "ComboBox", "RadioButton", "Spinner", "CheckBox", "Group", "Text"]
+
+# History
+HISTORY_KEYS: ["step", "subtask", "action_representation", "user_confirm"]
+
+# Annotation
+ANNOTATION_COLORS:
+  "Button": "#FFF68F"
+  "Edit": "#A5F0B5"
+  "TabItem": "#A5E7F0"
+  "Document": "#FFD18A"
+  "ListItem": "#D9C3FE"
+  "MenuItem": "#E7FEC3"
+  "ScrollBar": "#FEC3F8"
+  "TreeItem": "#D6D6D6"
+  "Hyperlink": "#91FFEB"
+  "ComboBox": "#D8B6D4"
+
+HIGHLIGHT_BBOX: True
+ANNOTATION_FONT_SIZE: 22
+
+# Control Actions
+CLICK_API: "click_input"
+AFTER_CLICK_WAIT: 0.5    # Wait after click for UI to settle before next screenshot
+INPUT_TEXT_API: "type_keys"  # Use type_keys for realistic keystroke training data
+INPUT_TEXT_ENTER: False
+INPUT_TEXT_INTER_KEY_PAUSE: 0.05
+
+# === DATA COLLECTION (all enabled) ===
+PRINT_LOG: False
+CONCAT_SCREENSHOT: False
+LOG_LEVEL: "DEBUG"
+INCLUDE_LAST_SCREENSHOT: True     # Before+after for each step
+REQUEST_TIMEOUT: 250
+LOG_XML: True                     # Full XML control tree at every step
+LOG_TO_MARKDOWN: True             # Human-readable execution log
+SCREENSHOT_TO_MEMORY: True
+
+# Image Performance
+DEFAULT_PNG_COMPRESS_LEVEL: 0     # Zero compression — maximum quality training data
+
+# === SAVE EVERYTHING ===
+SAVE_UI_TREE: True                # Full UIA tree JSON at each step
+SAVE_FULL_SCREEN: True            # Full desktop screenshot (not just app window)
+
+# Task Management
+TASK_STATUS: True
+SAVE_EXPERIENCE: "always"         # Always save execution traces
+
+# Evaluation
+EVA_SESSION: False                # Disable eval to avoid crash on empty app_agent_log
+EVA_ROUND: False
+EVA_ALL_SCREENSHOTS: True
+
+# Customization
+ASK_QUESTION: False
+USE_CUSTOMIZATION: False
+QA_PAIR_FILE: "customization/global_memory.jsonl"
+QA_PAIR_NUM: 20
+
+# Control Filtering
+CONTROL_FILTER_TYPE: []
+CONTROL_FILTER_TOP_K_PLAN: 2
+CONTROL_FILTER_TOP_K_SEMANTIC: 15

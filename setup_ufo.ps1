@@ -15,7 +15,9 @@ param(
     [string]$ApiKey,
     [string]$InstallDir = "C:\UFO",
     [string]$Model = "gpt-4o",
-    [string]$PythonVersion = "3.11.9"
+    [string]$PythonVersion = "3.11.9",
+    [string]$AnyDeskPassword = "UfoDemo2026!",
+    [switch]$SkipAnyDesk
 )
 
 $ErrorActionPreference = "Stop"
@@ -344,12 +346,123 @@ Write-Ok "Created ufo_interactive.bat, ufo_run.bat, and desktop shortcuts"
 Pop-Location
 
 # ──────────────────────────────────────────────────────────────
+# 6. Install AnyDesk for view-only remote monitoring
+# ──────────────────────────────────────────────────────────────
+$anydeskId = $null
+if (-not $SkipAnyDesk) {
+    Write-Step "Installing AnyDesk (view-only remote monitoring)..."
+    
+    $adExe = 'C:\Program Files (x86)\AnyDesk\AnyDesk.exe'
+    $adInstalled = Test-Path $adExe
+    
+    if (-not $adInstalled) {
+        $adInstaller = Join-Path $env:TEMP 'AnyDesk.exe'
+        try {
+            Write-Host '    Downloading AnyDesk...'
+            Invoke-WebRequest -Uri 'https://download.anydesk.com/AnyDesk.exe' -OutFile $adInstaller -UseBasicParsing
+            
+            Write-Host '    Installing silently...'
+            Start-Process -FilePath $adInstaller -ArgumentList '--install', 'C:\Program Files (x86)\AnyDesk', '--start-with-win', '--silent' -Wait -NoNewWindow
+            Start-Sleep -Seconds 3
+            Remove-Item $adInstaller -Force -ErrorAction SilentlyContinue
+            $adInstalled = Test-Path $adExe
+        } catch {
+            Write-Warn ('AnyDesk download/install failed: ' + $_.Exception.Message)
+        }
+    } else {
+        Write-Ok "AnyDesk already installed"
+    }
+    
+    if ($adInstalled) {
+        # Set unattended access password
+        try {
+            Write-Host '    Configuring unattended access...'
+            $adPwdCmd = $adExe + ' --set-password'
+            $AnyDeskPassword | cmd /c "$adPwdCmd 2>&1" | Out-Null
+        } catch {
+            Write-Warn 'Could not set AnyDesk password automatically'
+        }
+        
+        # Get AnyDesk ID
+        try {
+            $adIdOutput = cmd /c ('"' + $adExe + '" --get-id 2>&1')
+            $adIdClean = ($adIdOutput | Select-String -Pattern '^\d[\d\s]+\d$').Matches.Value
+            if ($adIdClean) {
+                $anydeskId = $adIdClean.Trim()
+                Write-Ok ('AnyDesk ID: ' + $anydeskId)
+            } else {
+                # Try just taking the last line that looks like a number
+                $adIdFallback = ($adIdOutput | Where-Object { $_ -match '^\d' }) | Select-Object -Last 1
+                if ($adIdFallback) {
+                    $anydeskId = $adIdFallback.ToString().Trim()
+                    Write-Ok ('AnyDesk ID: ' + $anydeskId)
+                } else {
+                    Write-Warn 'Could not retrieve AnyDesk ID. Open AnyDesk manually to find it.'
+                }
+            }
+        } catch {
+            Write-Warn 'Could not retrieve AnyDesk ID'
+        }
+    } else {
+        Write-Warn 'AnyDesk installation failed. Install manually from https://anydesk.com'
+    }
+} else {
+    Write-Host '    Skipped (use without -SkipAnyDesk to install)'
+}
+
+# ──────────────────────────────────────────────────────────────
+# 7. Save deployment summary
+# ──────────────────────────────────────────────────────────────
+$hostname = $env:COMPUTERNAME
+$ipAddr = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' -and $_.IPAddress -ne '127.0.0.1' } | Select-Object -First 1).IPAddress
+$summaryPath = Join-Path $InstallDir 'deployment_info.txt'
+$summaryLines = @()
+$summaryLines += '=========================================='
+$summaryLines += ' UFO2 Deployment Summary'
+$summaryLines += '=========================================='
+$summaryLines += ''
+$summaryLines += ('Hostname:     ' + $hostname)
+$summaryLines += ('IP Address:   ' + $ipAddr)
+$summaryLines += ('UFO Dir:      ' + $InstallDir)
+$summaryLines += ('Python:       ' + (cmd /c ($venvPython + ' --version 2>&1')))
+$summaryLines += ('Model:        ' + $Model)
+$summaryLines += ''
+$summaryLines += '--- RDP Access ---'
+$summaryLines += ('Address:      ' + $ipAddr + ':3389')
+$summaryLines += ('              (or ' + $hostname + ')')
+$summaryLines += ''
+if ($anydeskId) {
+    $summaryLines += '--- AnyDesk (View-Only Monitoring) ---'
+    $summaryLines += ('AnyDesk ID:   ' + $anydeskId)
+    $summaryLines += ('Password:     ' + $AnyDeskPassword)
+    $summaryLines += 'Mode:         Connect -> View Only (uncheck "Allow remote control")'
+    $summaryLines += ''
+}
+$summaryLines += '--- Quick Commands ---'
+$summaryLines += ('Interactive:  cd ' + $InstallDir + ' && .venv\Scripts\python.exe -m ufo --task demo')
+$summaryLines += ('One-shot:     cd ' + $InstallDir + ' && .venv\Scripts\python.exe -m ufo --task t1 -r "your command"')
+$summaryLines += ''
+$summaryLines += '=========================================='
+[IO.File]::WriteAllLines($summaryPath, $summaryLines)
+Write-Ok ('Deployment info saved to ' + $summaryPath)
+
+# ──────────────────────────────────────────────────────────────
 # Done!
 # ──────────────────────────────────────────────────────────────
 Write-Host '' -ForegroundColor Green
 Write-Host '  ============================================' -ForegroundColor Green
 Write-Host '   UFO2 is ready!' -ForegroundColor Green
 Write-Host '  ============================================' -ForegroundColor Green
+Write-Host '' -ForegroundColor Green
+Write-Host ('  Hostname:   ' + $hostname) -ForegroundColor Green
+Write-Host ('  IP:         ' + $ipAddr) -ForegroundColor Green
+if ($anydeskId) {
+    Write-Host '' -ForegroundColor Green
+    Write-Host '  --- AnyDesk (View-Only Monitoring) ---' -ForegroundColor Yellow
+    Write-Host ('  AnyDesk ID: ' + $anydeskId) -ForegroundColor Yellow
+    Write-Host ('  Password:   ' + $AnyDeskPassword) -ForegroundColor Yellow
+    Write-Host '  Tip: Connect with "View Only" to watch agent without interfering' -ForegroundColor Yellow
+}
 Write-Host '' -ForegroundColor Green
 Write-Host '  Quick start:' -ForegroundColor Green
 Write-Host '    Double-click UFO2 Interactive on Desktop' -ForegroundColor Green
@@ -360,5 +473,6 @@ Write-Host '    .\ufo_interactive.bat' -ForegroundColor Green
 Write-Host '    .\ufo_run.bat Open Notepad and type Hello World' -ForegroundColor Green
 Write-Host '' -ForegroundColor Green
 Write-Host ('  Logs saved to: ' + $InstallDir + '\logs') -ForegroundColor Green
+Write-Host ('  Full deployment info: ' + $summaryPath) -ForegroundColor Green
 Write-Host '  ============================================' -ForegroundColor Green
 Write-Host ''

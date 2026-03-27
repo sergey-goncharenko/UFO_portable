@@ -90,7 +90,7 @@ foreach ($run in 1..$Runs) {
         # Measure execution time
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         
-        $output = cmd /c ($venvPython + ' -m ufo --task ' + $taskName + ' -r "' + $request + '" 2>&1')
+        $output = cmd /c "cd /d $UfoDir && $venvPython -m ufo --task $taskName -r `"$request`" 2>&1"
         $exitCode = $LASTEXITCODE
         
         $sw.Stop()

@@ -1,0 +1,34 @@
+# UFO2 Agent Config: AGGRESSIVE
+# Uses GPT-4o-mini for HostAgent (faster routing, no vision needed)
+# Uses GPT-4o for AppAgent (needs vision for accurate control targeting)
+
+HOST_AGENT:
+  VISUAL_MODE: False           # CHANGED: no screenshot for routing agent
+  REASONING_MODEL: False
+  API_TYPE: "openai"
+  API_BASE: "https://api.openai.com/v1"
+  API_KEY: "YOUR_API_KEY_HERE"
+  API_VERSION: "2025-02-01-preview"
+  API_MODEL: "gpt-4o-mini"    # CHANGED: faster model for routing
+  PROMPT: "ufo/prompts/share/base/host_agent.yaml"
+  EXAMPLE_PROMPT: "ufo/prompts/examples/{mode}/host_agent_example.yaml"
+
+APP_AGENT:
+  VISUAL_MODE: True
+  REASONING_MODEL: False
+  API_TYPE: "openai"
+  API_BASE: "https://api.openai.com/v1"
+  API_KEY: "YOUR_API_KEY_HERE"
+  API_VERSION: "2025-02-01-preview"
+  API_MODEL: "gpt-4o"          # Keep full model for execution accuracy
+  PROMPT: "ufo/prompts/share/base/app_agent.yaml"
+  EXAMPLE_PROMPT: "ufo/prompts/examples/{mode}/app_agent_example.yaml"
+  EXAMPLE_PROMPT_AS: "ufo/prompts/examples/{mode}/app_agent_example_as.yaml"
+
+BACKUP_AGENT:
+  VISUAL_MODE: True
+  API_TYPE: "openai"
+  API_BASE: "https://api.openai.com/v1"
+  API_KEY: "YOUR_API_KEY_HERE"
+  API_VERSION: "2024-02-15-preview"
+  API_MODEL: "gpt-4o-mini"     # CHANGED: faster backup too

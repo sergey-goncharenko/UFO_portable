@@ -1,0 +1,93 @@
+# UFO2 Speed Config: AGGRESSIVE
+# Maximum speed (~3-8 sec per task)
+# Some accuracy tradeoffs - best for simple, well-defined tasks
+
+# LLM Parameters
+MAX_TOKENS: 1500             # CHANGED: was 2000 - faster responses
+MAX_RETRY: 3
+TEMPERATURE: 0.0
+TOP_P: 0.0
+TIMEOUT: 60
+
+# Control Backend
+CONTROL_BACKEND: ["uia"]
+IOU_THRESHOLD_FOR_MERGE: 0.1
+
+# Execution Limits
+MAX_STEP: 50
+MAX_ROUND: 1
+SLEEP_TIME: 0.3              # CHANGED: was 1 - aggressive, may miss slow apps
+RECTANGLE_TIME: 0             # CHANGED: was 1
+
+# Action Configuration
+ACTION_SEQUENCE: True         # CHANGED: was False - multi-action batching
+SHOW_VISUAL_OUTLINE_ON_SCREEN: False
+MAXIMIZE_WINDOW: False
+JSON_PARSING_RETRY: 2         # CHANGED: was 3 - fewer retries
+
+# Safety
+SAFE_GUARD: True
+CONTROL_LIST: ["Button", "Edit", "TabItem", "Document", "ListItem", "MenuItem", "ScrollBar", "TreeItem", "Hyperlink", "ComboBox", "RadioButton", "Spinner", "CheckBox", "Group", "Text"]
+
+# History
+HISTORY_KEYS: ["step", "subtask", "action_representation", "user_confirm"]
+
+# Annotation
+ANNOTATION_COLORS:
+  "Button": "#FFF68F"
+  "Edit": "#A5F0B5"
+  "TabItem": "#A5E7F0"
+  "Document": "#FFD18A"
+  "ListItem": "#D9C3FE"
+  "MenuItem": "#E7FEC3"
+  "ScrollBar": "#FEC3F8"
+  "TreeItem": "#D6D6D6"
+  "Hyperlink": "#91FFEB"
+  "ComboBox": "#D8B6D4"
+
+HIGHLIGHT_BBOX: True
+ANNOTATION_FONT_SIZE: 22
+
+# Control Actions
+CLICK_API: "click_input"
+AFTER_CLICK_WAIT: 0
+INPUT_TEXT_API: "set_text"    # CHANGED: was "type_keys"
+INPUT_TEXT_ENTER: False
+INPUT_TEXT_INTER_KEY_PAUSE: 0.01  # CHANGED: was 0.05
+
+# Logging - minimal for speed
+PRINT_LOG: False
+CONCAT_SCREENSHOT: False
+LOG_LEVEL: "WARNING"          # CHANGED: was "DEBUG" - minimal logging
+INCLUDE_LAST_SCREENSHOT: False # CHANGED: was True - skip previous screenshot
+REQUEST_TIMEOUT: 120           # CHANGED: was 250 - tighter timeout
+LOG_XML: False
+LOG_TO_MARKDOWN: False         # CHANGED: was True - skip markdown log
+SCREENSHOT_TO_MEMORY: False    # CHANGED: was True
+
+# Image Performance
+DEFAULT_PNG_COMPRESS_LEVEL: 3  # CHANGED: was 1 - more compression, less upload
+
+# Save Options
+SAVE_UI_TREE: False
+SAVE_FULL_SCREEN: False
+
+# Task Management
+TASK_STATUS: True
+SAVE_EXPERIENCE: "always_not"
+
+# Evaluation
+EVA_SESSION: True
+EVA_ROUND: False
+EVA_ALL_SCREENSHOTS: False     # CHANGED: was True
+
+# Customization
+ASK_QUESTION: False
+USE_CUSTOMIZATION: False
+QA_PAIR_FILE: "customization/global_memory.jsonl"
+QA_PAIR_NUM: 20
+
+# Control Filtering Configuration
+CONTROL_FILTER_TYPE: []
+CONTROL_FILTER_TOP_K_PLAN: 2
+CONTROL_FILTER_TOP_K_SEMANTIC: 15

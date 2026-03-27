@@ -1,0 +1,93 @@
+# UFO2 Speed Config: CONSERVATIVE
+# Reliable with moderate speed improvement (~8-15 sec per task)
+# Safe for most applications, minimal accuracy tradeoff
+
+# LLM Parameters
+MAX_TOKENS: 2000
+MAX_RETRY: 3
+TEMPERATURE: 0.0
+TOP_P: 0.0
+TIMEOUT: 60
+
+# Control Backend
+CONTROL_BACKEND: ["uia"]
+IOU_THRESHOLD_FOR_MERGE: 0.1
+
+# Execution Limits
+MAX_STEP: 50
+MAX_ROUND: 1
+SLEEP_TIME: 0.5            # CHANGED: was 1 - still safe for most apps
+RECTANGLE_TIME: 0           # CHANGED: was 1 - no visual outline (no one watches in voice mode)
+
+# Action Configuration
+ACTION_SEQUENCE: True       # CHANGED: was False - multi-action batching (51% fewer LLM calls)
+SHOW_VISUAL_OUTLINE_ON_SCREEN: False
+MAXIMIZE_WINDOW: False
+JSON_PARSING_RETRY: 3
+
+# Safety
+SAFE_GUARD: True
+CONTROL_LIST: ["Button", "Edit", "TabItem", "Document", "ListItem", "MenuItem", "ScrollBar", "TreeItem", "Hyperlink", "ComboBox", "RadioButton", "Spinner", "CheckBox", "Group", "Text"]
+
+# History
+HISTORY_KEYS: ["step", "subtask", "action_representation", "user_confirm"]
+
+# Annotation
+ANNOTATION_COLORS:
+  "Button": "#FFF68F"
+  "Edit": "#A5F0B5"
+  "TabItem": "#A5E7F0"
+  "Document": "#FFD18A"
+  "ListItem": "#D9C3FE"
+  "MenuItem": "#E7FEC3"
+  "ScrollBar": "#FEC3F8"
+  "TreeItem": "#D6D6D6"
+  "Hyperlink": "#91FFEB"
+  "ComboBox": "#D8B6D4"
+
+HIGHLIGHT_BBOX: True
+ANNOTATION_FONT_SIZE: 22
+
+# Control Actions
+CLICK_API: "click_input"
+AFTER_CLICK_WAIT: 0
+INPUT_TEXT_API: "set_text"   # CHANGED: was "type_keys" - instant text insertion
+INPUT_TEXT_ENTER: False
+INPUT_TEXT_INTER_KEY_PAUSE: 0.05
+
+# Logging - keep for benchmarking
+PRINT_LOG: False
+CONCAT_SCREENSHOT: False
+LOG_LEVEL: "INFO"            # CHANGED: was "DEBUG" - less logging overhead
+INCLUDE_LAST_SCREENSHOT: True
+REQUEST_TIMEOUT: 250
+LOG_XML: False
+LOG_TO_MARKDOWN: True
+SCREENSHOT_TO_MEMORY: True
+
+# Image Performance
+DEFAULT_PNG_COMPRESS_LEVEL: 1  # Keep high quality
+
+# Save Options
+SAVE_UI_TREE: False
+SAVE_FULL_SCREEN: False
+
+# Task Management
+TASK_STATUS: True
+SAVE_EXPERIENCE: "always_not"
+
+# Evaluation
+EVA_SESSION: True
+EVA_ROUND: False
+EVA_ALL_SCREENSHOTS: True
+
+# Customization
+ASK_QUESTION: False
+USE_CUSTOMIZATION: False
+QA_PAIR_FILE: "customization/global_memory.jsonl"
+QA_PAIR_NUM: 20
+
+# Control Filtering Configuration
+CONTROL_FILTER_TYPE: []
+CONTROL_FILTER_TOP_K_PLAN: 2
+CONTROL_FILTER_TOP_K_SEMANTIC: 15

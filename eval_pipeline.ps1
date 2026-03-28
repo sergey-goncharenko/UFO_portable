@@ -62,6 +62,7 @@ $models = $registry.models
 $allTasks = @()
 if ($registry.desktop_tasks) { $allTasks += $registry.desktop_tasks }
 if ($registry.browser_tasks) { $allTasks += $registry.browser_tasks }
+if ($registry.auth_browser_tasks) { $allTasks += $registry.auth_browser_tasks }
 if ($registry.cross_tasks)   { $allTasks += $registry.cross_tasks }
 # Backward compat: if old 'tasks' key exists, use it
 if ($registry.tasks -and $allTasks.Count -eq 0) { $allTasks = $registry.tasks }
@@ -292,6 +293,16 @@ foreach ($modelName in $modelsToRun) {
             $tarsCmd = 'agent-tars run --input "' + $task.request + '" --format json --model.provider ' + $m.provider + ' --model.id ' + $m.model_id + ' --model.apiKey ' + $ApiKey + ' --quiet'
             if ($m.api_base -and $m.api_base -ne 'https://api.openai.com/v1') {
                 $tarsCmd += ' --model.baseURL ' + $m.api_base
+            }
+            # Use auth config for tasks that need login
+            if ($task.auth_required) {
+                $authCfg = Join-Path $scriptDir $settings.tars_auth_config
+                if (Test-Path $authCfg) {
+                    $tarsCmd += ' --config "' + $authCfg + '"'
+                } else {
+                    Write-Host ' -> SKIP (auth config not found)' -ForegroundColor DarkGray
+                    continue
+                }
             }
             $output = cmd /c "$tarsCmd 2>&1"
             $exitCode = $LASTEXITCODE

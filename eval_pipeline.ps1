@@ -1,16 +1,17 @@
 <#
 .SYNOPSIS
-    Continuous model evaluation pipeline for UFO2 desktop automation.
+    Continuous model evaluation pipeline — UFO2 (desktop) + Agent TARS (browser).
 .DESCRIPTION
-    Reads model_registry.yaml, runs each enabled model through the task suite,
-    collects metrics, and appends results to a central CSV for trend tracking.
+    Reads model_registry.yaml, runs each enabled model through desktop and/or
+    browser task suites, collects metrics, and appends to a central CSV.
     
     Usage:
-        .\eval_pipeline.ps1 -ApiKey "sk-proj-..."                # Run all enabled models
-        .\eval_pipeline.ps1 -ApiKey "sk-proj-..." -RunModel "gpt-4o-mini"  # Run one model
-        .\eval_pipeline.ps1 -ApiKey "sk-proj-..." -RunAll         # Run ALL models (incl disabled)
-        .\eval_pipeline.ps1 -ListModels                           # Show available models
-        .\eval_pipeline.ps1 -ShowResults                          # Show results leaderboard
+        .\eval_pipeline.ps1 -ApiKey "sk-proj-..."                    # Run all enabled (desktop + browser)
+        .\eval_pipeline.ps1 -ApiKey "sk-proj-..." -Engine ufo        # Desktop tasks only
+        .\eval_pipeline.ps1 -ApiKey "sk-proj-..." -Engine tars       # Browser tasks only
+        .\eval_pipeline.ps1 -ApiKey "sk-proj-..." -RunModel "gpt-4o-mini"  # One model
+        .\eval_pipeline.ps1 -ListModels                              # Show available models
+        .\eval_pipeline.ps1 -ShowResults                             # Show results leaderboard
 .NOTES
     Requires: model_registry.yaml in same directory
     Results appended to: eval_results/all_results.csv
@@ -21,6 +22,8 @@ param(
     [switch]$RunAll,
     [switch]$ListModels,
     [switch]$ShowResults,
+    [ValidateSet('all', 'ufo', 'tars')]
+    [string]$Engine = 'all',
     [string]$UfoDir = 'C:\UFO',
     [string]$RegistryFile
 )
@@ -55,7 +58,13 @@ try {
 }
 
 $models = $registry.models
-$tasks = $registry.tasks
+# Merge all task lists
+$allTasks = @()
+if ($registry.desktop_tasks) { $allTasks += $registry.desktop_tasks }
+if ($registry.browser_tasks) { $allTasks += $registry.browser_tasks }
+if ($registry.cross_tasks)   { $allTasks += $registry.cross_tasks }
+# Backward compat: if old 'tasks' key exists, use it
+if ($registry.tasks -and $allTasks.Count -eq 0) { $allTasks = $registry.tasks }
 $settings = $registry.settings
 $resultsDir = Join-Path $scriptDir $settings.results_dir
 New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
@@ -169,13 +178,36 @@ if (-not $ApiKey) {
 # Run evaluation
 # ──────────────────────────────────────────────────────────────
 Write-Host ''
-Write-Host '  UFO2 Model Evaluation Pipeline' -ForegroundColor Cyan
-Write-Host '  ===============================' -ForegroundColor Cyan
+Write-Host '  UFO2 + Agent TARS Evaluation Pipeline' -ForegroundColor Cyan
+Write-Host '  ======================================' -ForegroundColor Cyan
 Write-Host ('  Models:     ' + ($modelsToRun -join ', ')) -ForegroundColor Green
-Write-Host ('  Tasks:      ' + $tasks.Count) -ForegroundColor Green
+Write-Host ('  Engine:     ' + $Engine) -ForegroundColor Green
 Write-Host ('  Resolution: ' + $resolution) -ForegroundColor Green
 Write-Host ('  Max steps:  ' + $settings.max_steps) -ForegroundColor Green
+
+# Filter tasks by engine
+$tasksToRun = @()
+foreach ($t in $allTasks) {
+    $eng = if ($t.engine) { $t.engine } else { 'ufo' }
+    if ($Engine -eq 'all' -or $eng -eq $Engine -or $eng -eq 'both') {
+        $tasksToRun += $t
+    }
+}
+Write-Host ('  Tasks:      ' + $tasksToRun.Count + ' (' + $Engine + ')') -ForegroundColor Green
 Write-Host ''
+
+# Check if TARS is available
+$tarsAvailable = $false
+if ($Engine -eq 'all' -or $Engine -eq 'tars') {
+    $tarsCheck = cmd /c 'agent-tars --version 2>&1'
+    if ($tarsCheck -match '\d+\.\d+') {
+        $tarsAvailable = $true
+        Write-Host ('  Agent TARS: v' + $tarsCheck.Trim()) -ForegroundColor Green
+    } else {
+        Write-Host '  Agent TARS: not installed (run setup_tars.ps1)' -ForegroundColor Yellow
+        if ($Engine -eq 'tars') { exit 1 }
+    }
+}
 
 $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -183,7 +215,7 @@ $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 foreach ($modelName in $modelsToRun) {
     $m = $models.$modelName
     
-    Write-Host ('  ── Model: ' + $modelName + ' ──') -ForegroundColor Yellow
+    Write-Host ('  -- Model: ' + $modelName + ' --') -ForegroundColor Yellow
     Write-Host ('     ' + $m.description) -ForegroundColor DarkGray
     
     # Generate UFO agents.yaml for this model
@@ -228,34 +260,67 @@ foreach ($modelName in $modelsToRun) {
     if (Test-Path $sysSrc) {
         $sysContent = Get-Content $sysSrc -Raw
         $sysContent = $sysContent -replace 'MAX_STEP:\s*\d+', ('MAX_STEP: ' + $settings.max_steps)
-        # Disable eval to avoid crash
         $sysContent = $sysContent -replace 'EVA_SESSION:\s*\w+', 'EVA_SESSION: False'
         $sysContent | Set-Content $sysDst -Encoding UTF8
     }
     
     # Run each task
-    foreach ($task in $tasks) {
+    foreach ($task in $tasksToRun) {
+        $taskEngine = if ($task.engine) { $task.engine } else { 'ufo' }
         $taskId = $runId + '_' + $modelName + '_' + $task.name
         $logDir = Join-Path $UfoDir ('logs\' + $taskId)
         
-        Write-Host ('     Task: ' + $task.name) -ForegroundColor White -NoNewline
+        # Decide which engine to use
+        $useEngine = 'ufo'
+        if ($taskEngine -eq 'tars' -and $tarsAvailable) {
+            $useEngine = 'tars'
+        } elseif ($taskEngine -eq 'both') {
+            # cross-engine tasks: run with TARS if available, else UFO
+            $useEngine = if ($tarsAvailable) { 'tars' } else { 'ufo' }
+        } elseif ($taskEngine -eq 'tars' -and -not $tarsAvailable) {
+            Write-Host ('     Task: ' + $task.name + ' -> SKIP (TARS not installed)') -ForegroundColor DarkGray
+            continue
+        }
+        
+        $engineLabel = if ($useEngine -eq 'tars') { '[TARS]' } else { '[UFO] ' }
+        Write-Host ('     ' + $engineLabel + ' ' + $task.name) -ForegroundColor White -NoNewline
         
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $output = cmd /c "cd /d $UfoDir && $venvPython -m ufo --task $taskId -r `"$($task.request)`" 2>&1"
-        $exitCode = $LASTEXITCODE
+        
+        if ($useEngine -eq 'tars') {
+            # Run via Agent TARS CLI
+            $tarsCmd = 'agent-tars run --input "' + $task.request + '" --format json --model.provider ' + $m.provider + ' --model.id ' + $m.model_id + ' --model.apiKey ' + $ApiKey + ' --quiet'
+            if ($m.api_base -and $m.api_base -ne 'https://api.openai.com/v1') {
+                $tarsCmd += ' --model.baseURL ' + $m.api_base
+            }
+            $output = cmd /c "$tarsCmd 2>&1"
+            $exitCode = $LASTEXITCODE
+        } else {
+            # Run via UFO
+            $output = cmd /c "cd /d $UfoDir && $venvPython -m ufo --task $taskId -r `"$($task.request)`" 2>&1"
+            $exitCode = $LASTEXITCODE
+        }
+        
         $sw.Stop()
         $totalTime = [math]::Round($sw.Elapsed.TotalSeconds, 1)
         
         # Parse step count
-        $stepMatches = $output | Select-String -Pattern 'Step (\d+)' -AllMatches
         $actualSteps = 0
-        if ($stepMatches) {
-            $nums = $stepMatches.Matches | ForEach-Object { [int]$_.Groups[1].Value }
-            $actualSteps = ($nums | Measure-Object -Maximum).Maximum
+        if ($useEngine -eq 'tars') {
+            # TARS: count tool_call occurrences in output
+            $tarsSteps = ($output | Select-String -Pattern 'tool_call|action|navigate|click|type' -AllMatches)
+            $actualSteps = if ($tarsSteps) { [math]::Max(1, $tarsSteps.Matches.Count) } else { 1 }
+        } else {
+            # UFO: count Step N from output
+            $stepMatches = $output | Select-String -Pattern 'Step (\d+)' -AllMatches
+            if ($stepMatches) {
+                $nums = $stepMatches.Matches | ForEach-Object { [int]$_.Groups[1].Value }
+                $actualSteps = ($nums | Measure-Object -Maximum).Maximum
+            }
         }
         
         # Determine status
-        $finished = ($output -match 'FINISH') -or ($output -match 'SUCCESS')
+        $finished = ($output -match 'FINISH') -or ($output -match 'SUCCESS') -or ($exitCode -eq 0 -and $useEngine -eq 'tars')
         $hitLimit = ($actualSteps -ge $settings.max_steps)
         $statusText = if ($finished) { 'PASS' } elseif ($hitLimit) { 'LIMIT' } else { 'FAIL' }
         
@@ -264,9 +329,9 @@ foreach ($modelName in $modelsToRun) {
         $efficiency = if ($optSteps -gt 0 -and $actualSteps -gt 0) { [math]::Round($actualSteps / $optSteps, 2) } else { 0 }
         $avgLatency = if ($actualSteps -gt 0) { [math]::Round($totalTime / $actualSteps, 1) } else { 0 }
         
-        # Count data collected
+        # Count data collected (UFO only)
         $screenshots = 0; $uitrees = 0
-        if (Test-Path $logDir) {
+        if ($useEngine -eq 'ufo' -and (Test-Path $logDir)) {
             $screenshots = (Get-ChildItem -Path $logDir -Filter '*.png' -Recurse -ErrorAction SilentlyContinue).Count
             $uitrees = (Get-ChildItem -Path $logDir -Filter '*ui_tree*' -Recurse -ErrorAction SilentlyContinue).Count
         }
@@ -293,6 +358,7 @@ foreach ($modelName in $modelsToRun) {
             Efficiency     = $efficiency
             TotalTime_Sec  = $totalTime
             AvgLatency_Sec = $avgLatency
+            Engine         = $useEngine
             Screenshots    = $screenshots
             UITrees        = $uitrees
             Resolution     = $resolution

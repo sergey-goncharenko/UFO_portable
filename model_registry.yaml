@@ -117,27 +117,69 @@ models:
   #   enabled: false
 
 # ── Task Suite ────────────────────────────────────────────────
-# These are the tasks every model is tested against
-tasks:
+# Tasks are tagged with 'engine': ufo, tars, or both
+# UFO tasks = desktop automation | TARS tasks = browser automation
+
+# --- Desktop tasks (UFO only) ---
+desktop_tasks:
   - name: notepad_type
     request: "Open Notepad and type Hello World"
     optimal_steps: 3
+    engine: ufo
 
   - name: calc_multiply
     request: "Open Calculator and compute 42 times 58"
     optimal_steps: 3
+    engine: ufo
 
   - name: notepad_saveas
     request: "Open Notepad, type Benchmark Test, save as benchmark.txt on Desktop"
     optimal_steps: 6
+    engine: ufo
 
   - name: explorer_folder
     request: "Open File Explorer and create a new folder on Desktop called EvalTest"
     optimal_steps: 5
+    engine: ufo
 
   - name: notepad_selectall
     request: "Open Notepad, type Hello, select all text, copy it"
     optimal_steps: 5
+    engine: ufo
+
+# --- Browser tasks (Agent TARS) ---
+browser_tasks:
+  - name: google_search
+    request: "Open Google and search for 'best CRM for small business 2026'"
+    optimal_steps: 3
+    engine: tars
+
+  - name: wikipedia_lookup
+    request: "Go to Wikipedia and find the population of Tokyo"
+    optimal_steps: 3
+    engine: tars
+
+  - name: github_navigate
+    request: "Go to github.com/microsoft/UFO and tell me how many stars it has"
+    optimal_steps: 3
+    engine: tars
+
+  - name: form_fill
+    request: "Go to https://httpbin.org/forms/post and fill in the form with name 'John Smith', email 'john@test.com' and submit"
+    optimal_steps: 5
+    engine: tars
+
+  - name: multi_tab_research
+    request: "Search Google for 'QuickBooks vs Xero pricing', open the first two results, and summarize the key differences"
+    optimal_steps: 6
+    engine: tars
+
+# --- Cross-engine tasks (both can attempt) ---
+cross_tasks:
+  - name: browser_search_edge
+    request: "Open Microsoft Edge and search for 'weather in New York'"
+    optimal_steps: 3
+    engine: both
 
 # ── Pipeline Settings ─────────────────────────────────────────
 settings:

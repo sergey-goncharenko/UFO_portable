@@ -1,99 +1,194 @@
-# UFO² Portable Demo Kit
+# UFO Portable — Desktop & Browser AI Agent Toolkit
 
-One-click scripts to install, package, and demo [Microsoft UFO²](https://github.com/microsoft/UFO) (Desktop AgentOS) on any Windows VM.
+One-click deployment, benchmarking, and workflow recording for AI desktop/browser automation on Windows VMs.
 
-UFO² is an LLM-powered desktop automation agent that takes natural language commands and executes them via Windows UI Automation — mouse clicks, keyboard input, and native API calls.
+Combines [Microsoft UFO2](https://github.com/microsoft/UFO) (desktop automation) and [Agent TARS](https://github.com/bytedance/UI-TARS-desktop) (browser automation) into a unified evaluation and deployment platform.
 
-## What's Inside
+## What This Does
 
-| Script | Purpose |
-|---|---|
-| `setup_ufo.ps1` | **One-click install** on a fresh Windows VM — installs Python, clones UFO, creates venv, installs deps, configures API key, creates desktop shortcuts |
-| `run_demo.ps1` | **Interactive demo menu** with 7 curated scenarios (Notepad, VS Code, web search, file management, calculator, custom, interactive) |
-| `package_offline.ps1` | **Package builder** — creates a portable ZIP you can transfer to air-gapped or restricted VMs |
-| `VM_SETUP.md` | Detailed VM requirements, troubleshooting, and step-by-step guide |
+- **Deploy** UFO2 + Agent TARS on any Windows VM in one command
+- **Benchmark** different LLM models (GPT-4o, GPT-4o-mini, Claude, local models) against a task suite
+- **Record** business workflows with voice narration and convert to replayable automation
+- **Compare** desktop (UFO) vs browser (TARS) engines side-by-side
+- **Monitor** the agent working via AnyDesk view-only mode
 
 ## Quick Start
 
-### On a VM with internet
-
 ```powershell
-# Download and run the setup script
+git clone https://github.com/sergey-goncharenko/UFO_portable.git
+cd UFO_portable
+
+# One-click setup (installs UFO2 + Agent TARS + AnyDesk + Python)
 powershell -ExecutionPolicy Bypass -File setup_ufo.ps1 -ApiKey "sk-proj-YOUR_KEY"
 
-# Or use environment variable
-$env:OPENAI_API_KEY = "sk-proj-..."
-powershell -ExecutionPolicy Bypass -File setup_ufo.ps1
+# Run a desktop task
+C:\UFO\ufo_run.bat "Open Notepad and type Hello World"
 
-# Or let it prompt you
-powershell -ExecutionPolicy Bypass -File setup_ufo.ps1
+# Run a browser task
+agent-tars run --input "Search Google for best CRM for small business"
+
+# Run the full evaluation pipeline
+.\eval_pipeline.ps1 -ApiKey "sk-proj-..." -Engine all
 ```
 
-Then launch the demo:
+## Repository Structure
+
+### Setup & Deployment
+
+| File | Description |
+|---|---|
+| `setup_ufo.ps1` | **Main installer** — Python 3.11, UFO2, Agent TARS, AnyDesk, config, desktop shortcuts. One command does everything. |
+| `setup_tars.ps1` | Standalone Agent TARS installer (Node.js 22, Chrome check, browser profile setup) |
+| `package_offline.ps1` | Package the install into a portable ZIP for offline/air-gapped VMs |
+| `run_demo.ps1` | Interactive demo menu with 7 curated scenarios |
+
+### Benchmarking & Evaluation
+
+| File | Description |
+|---|---|
+| `eval_pipeline.ps1` | **Main evaluation pipeline** — runs models through task suites, collects metrics to CSV, shows leaderboard |
+| `model_registry.yaml` | Central config for all models (OpenAI, Anthropic, Azure, local) + task definitions |
+| `add_model.ps1` | Quick-add a new model to the registry |
+| `benchmark.ps1` | A/B config comparison (conservative vs aggressive) |
+| `compare_results.ps1` | Side-by-side results viewer |
+| `research_benchmark.ps1` | Detailed per-step metrics for VLM research (accuracy, efficiency, latency) |
+
+### Workflow Recording
+
+| File | Description |
+|---|---|
+| `start_recording.ps1` | Launches Steps Recorder + microphone recording simultaneously. Falls back to FFmpeg screen capture if PSR is deprecated. |
+| `merge_voice_recording.py` | Transcribes voice (Whisper), matches to steps, outputs universal `workflow.json` + UFO-ready ZIP + TARS replay script |
+
+### Configs
+
+| File | Description |
+|---|---|
+| `configs/system_conservative.yaml` | Safe speed optimizations for UFO |
+| `configs/system_aggressive.yaml` | Maximum speed, some accuracy tradeoff |
+| `configs/system_datacollect.yaml` | Full data capture for training/research |
+| `configs/agents_*.yaml` | Agent configs for each profile (model, vision mode, etc.) |
+
+## Evaluation Pipeline
+
+### Add models to test
+
+Edit `model_registry.yaml` or use the quick-add script:
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File run_demo.ps1
+# Add a new model
+.\add_model.ps1 -Name "gpt-5" -ModelId "gpt-5" -Description "GPT-5 flagship"
+
+# Add a local model
+.\add_model.ps1 -Name "qwen-vl" -ModelId "Qwen2-VL-7B" -ApiBase "http://localhost:8000/v1"
 ```
 
-### For offline VMs
+Pre-configured models: `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o4-mini`, `claude-sonnet-4`
 
-On your machine (with UFO already installed at C:\UFO):
+### Run evaluations
+
 ```powershell
-# Lightweight package (~50 MB, VM needs internet for pip install)
-powershell -ExecutionPolicy Bypass -File package_offline.ps1
+# All enabled models, all tasks (desktop + browser)
+.\eval_pipeline.ps1 -ApiKey "sk-proj-..." -Engine all
 
-# Fully offline package (~2 GB, includes pre-built venv)
-powershell -ExecutionPolicy Bypass -File package_offline.ps1 -IncludeVenv
+# Desktop tasks only (UFO)
+.\eval_pipeline.ps1 -ApiKey "sk-proj-..." -Engine ufo
+
+# Browser tasks only (Agent TARS)
+.\eval_pipeline.ps1 -ApiKey "sk-proj-..." -Engine tars
+
+# Single model
+.\eval_pipeline.ps1 -ApiKey "sk-proj-..." -RunModel "gpt-4o-mini"
+
+# View leaderboard
+.\eval_pipeline.ps1 -ShowResults
 ```
 
-Copy the ZIP to the target VM, extract, run `FIRST_RUN.bat`, add your API key, run `START_DEMO.bat`.
+### Task suite (16 tasks)
+
+| Engine | Tasks | What they test |
+|---|---|---|
+| **UFO** (desktop) | 5 tasks | Notepad, Calculator, File Explorer, keyboard shortcuts |
+| **TARS** (browser, public) | 5 tasks | Google search, Wikipedia, GitHub, form fill, multi-tab research |
+| **TARS** (browser, authenticated) | 5 tasks | Outlook email, Google Drive, Calendar, Teams, SharePoint |
+| **Cross-engine** | 1 task | Same task on both engines for comparison |
+
+### Metrics collected
+
+- **Pass rate** — did the model complete the task?
+- **Step efficiency** — actual steps / optimal steps (1.0x = perfect)
+- **Latency per step** — LLM inference time
+- **Training data** — screenshots + UI trees captured per run
+
+All results accumulate in `eval_results/all_results.csv` for trend tracking.
+
+## Workflow Recording
+
+Record a business owner demonstrating a workflow, then convert it to automation:
+
+```powershell
+# 1. Start recording (Steps Recorder + microphone)
+.\start_recording.ps1 -Name "check_invoices"
+
+# 2. Business owner does the workflow while narrating
+#    "I'm opening QuickBooks... clicking on Invoices... filtering by unpaid..."
+
+# 3. Convert voice + steps to universal workflow format
+cd C:\UFO
+.venv\Scripts\python.exe ..\UFO_portable\merge_voice_recording.py ^
+    --zip C:\recordings\check_invoices.zip ^
+    --audio C:\recordings\check_invoices_audio.wav ^
+    --request "Check unpaid invoices in QuickBooks" ^
+    --feed-ufo --feed-tars
+```
+
+**Outputs:**
+- `workflow.json` — universal format, tool-agnostic
+- `_enriched.zip` — UFO-ready (feeds into UFO's RAG demonstration system)
+- `_tars_replay.bat` — Agent TARS CLI replay commands
+- `_transcript.txt` — full voice transcript
+
+The recorder auto-detects browser vs desktop workflows and recommends the right engine.
 
 ## VM Requirements
 
-- **OS:** Windows 10/11 (x64)
-- **RAM:** 8 GB min (16 GB recommended)
-- **Disk:** 10 GB free
-- **Display:** 1920×1080 recommended (UFO uses screenshots)
-- **Network:** Required for OpenAI API calls
-- **Session:** Interactive desktop (RDP works, but keep the window open and unlocked)
+| Requirement | Details |
+|---|---|
+| OS | Windows 10/11 (x64) |
+| RAM | 8 GB minimum |
+| Display | 1920x1080 recommended |
+| Python | 3.10-3.12 (auto-installed) |
+| Node.js | 22+ (auto-installed for TARS) |
+| Network | Required for LLM API calls |
 
-## Demo Scenarios
+For view-only monitoring, the setup auto-installs AnyDesk. Connect with "View Only" to watch the agent work without interfering with mouse/keyboard.
 
-The `run_demo.ps1` menu offers:
-
-1. **Notepad Magic** — Opens Notepad and types text via natural language
-2. **VS Code Settings** — Changes VS Code configuration
-3. **Web Search** — Opens Edge and searches the web
-4. **File Explorer** — Creates folders on the Desktop
-5. **Calculator** — Opens Calculator and performs math
-6. **Custom Command** — Type your own natural language request
-7. **Interactive Mode** — Multi-turn conversation with UFO
-
-## How It Works
+## Architecture
 
 ```
-You say: "Open Notepad and type Hello World"
-         │
-         ▼
-   ┌─────────────┐    screenshot    ┌──────────┐
-   │  HostAgent  │ ◄──────────────► │ GPT-4o   │
-   │ (orchestrator)│    + UIA tree   │ (vision) │
-   └──────┬──────┘                  └──────────┘
-          │ delegates
-          ▼
-   ┌─────────────┐    set_edit_text  ┌──────────┐
-   │  AppAgent   │ ────────────────► │ Notepad  │
-   │ (notepad.exe)│                  │          │
-   └─────────────┘                  └──────────┘
+Voice Command / Text Request
+         |
+    Intent Router
+    /          \
+   v            v
+UFO2           Agent TARS
+(Desktop)      (Browser)
+   |              |
+   v              v
+Windows UIA    DOM + Visual
+pyautogui      Playwright
+pywinauto      Chromium
+   |              |
+   v              v
+eval_results/all_results.csv  <-- unified metrics
 ```
-
-UFO² uses Windows UI Automation to identify controls, GPT-4o (with vision) to plan actions, and a hybrid GUI+API execution strategy for reliability.
 
 ## Credits
 
-- **UFO²** by Microsoft Research — [github.com/microsoft/UFO](https://github.com/microsoft/UFO)
-- Paper: [UFO2: The Desktop AgentOS](https://arxiv.org/abs/2504.14603)
+- **UFO2** by Microsoft Research — [github.com/microsoft/UFO](https://github.com/microsoft/UFO) ([paper](https://arxiv.org/abs/2504.14603))
+- **Agent TARS** by ByteDance — [github.com/bytedance/UI-TARS-desktop](https://github.com/bytedance/UI-TARS-desktop) ([paper](https://arxiv.org/abs/2501.12326))
 
 ## License
 
-Demo scripts in this repo: MIT  
-UFO² itself: [MIT License](https://github.com/microsoft/UFO/blob/main/LICENSE)
+Scripts in this repo: MIT
+UFO2: [MIT](https://github.com/microsoft/UFO/blob/main/LICENSE) | Agent TARS: [Apache 2.0](https://github.com/bytedance/UI-TARS-desktop/blob/main/LICENSE)

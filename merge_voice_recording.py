@@ -1,321 +1,275 @@
 """
-Merge voice narration with Windows Steps Recorder output.
+Workflow Recorder - merge voice narration with Windows Steps Recorder.
 
-Takes a PSR ZIP file + audio WAV file, transcribes the voice with Whisper,
-matches transcript segments to PSR steps by timestamp, and injects them
-as comments into the MHTML. The enriched ZIP can then be fed to UFO's
-record_processor.
+Produces a tool-agnostic workflow.json that can be consumed by:
+  - UFO (desktop automation via record_processor)
+  - Agent TARS (browser automation via CLI)
+  - Any future automation tool
 
 Usage:
-    python merge_voice_recording.py --zip recording.zip --audio recording_audio.wav --request "Check movies at AMC"
-    python merge_voice_recording.py --zip recording.zip --audio recording_audio.wav --request "Check movies" --feed-ufo
+    python merge_voice_recording.py --zip rec.zip --audio rec_audio.wav -r "Check movie times at AMC"
+    python merge_voice_recording.py --zip rec.zip --audio rec_audio.wav -r "Check movie times" --feed-ufo
+    python merge_voice_recording.py --zip rec.zip --audio rec_audio.wav -r "Check movie times" --feed-tars
+    python merge_voice_recording.py --zip rec.zip --audio rec_audio.wav -r "Check movie times" --feed-ufo --feed-tars
 """
 
 import argparse
-import io
+import json
 import os
 import re
+import subprocess
 import sys
 import zipfile
-import tempfile
-import shutil
 from datetime import datetime
 
 
-def transcribe_audio(audio_path: str, api_key: str = None) -> list[dict]:
+def transcribe_audio(audio_path, api_key=None):
     """Transcribe audio using OpenAI Whisper API. Returns timestamped segments."""
     from openai import OpenAI
-
     client = OpenAI(api_key=api_key) if api_key else OpenAI()
-
     with open(audio_path, "rb") as f:
         response = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f,
+            model="whisper-1", file=f,
             response_format="verbose_json",
             timestamp_granularities=["segment"],
         )
-
-    segments = []
-    for seg in response.segments:
-        segments.append(
-            {
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text.strip(),
-            }
-        )
-
-    return segments
+    return [{"start": s.start, "end": s.end, "text": s.text.strip()} for s in response.segments]
 
 
-def parse_psr_step_times(mhtml_content: str) -> list[dict]:
-    """Extract step timestamps from PSR MHTML content."""
-    # PSR stores steps in UserActionData XML with TimeStamp attribute
+def parse_psr_zip(zip_path):
+    """Parse PSR ZIP. Returns (mhtml_content, list of step dicts)."""
     import xml.etree.ElementTree as ET
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        mht_files = [n for n in zf.namelist() if n.lower().endswith((".mht", ".mhtml"))]
+        if not mht_files:
+            raise ValueError("No .mht file found in ZIP")
+        mhtml = zf.read(mht_files[0]).decode("utf-8", errors="replace")
 
     steps = []
-
-    # Find UserActionData
-    match = re.search(
-        r"<UserActionData>(.*?)</UserActionData>", mhtml_content, re.DOTALL
-    )
+    match = re.search(r"<UserActionData>(.*?)</UserActionData>", mhtml, re.DOTALL)
     if not match:
-        print("WARNING: No UserActionData found in PSR file")
-        return steps
+        return mhtml, steps
 
     root = ET.fromstring(match.group(1))
     for action in root.findall("EachAction"):
-        action_num = int(action.get("ActionNumber", 0))
-        timestamp_str = action.get("TimeStamp", "")
-        description = ""
-        desc_elem = action.find("Description")
-        if desc_elem is not None and desc_elem.text:
-            description = desc_elem.text
-
-        # Parse timestamp (PSR format: "2026-03-29T10:15:30.123")
-        step_time = None
-        if timestamp_str:
+        num = int(action.get("ActionNumber", 0))
+        ts_str = action.get("TimeStamp", "")
+        app = action.get("FileName", "")
+        desc_el = action.find("Description")
+        desc = desc_el.text if desc_el is not None and desc_el.text else ""
+        act_el = action.find("Action")
+        act = act_el.text if act_el is not None and act_el.text else ""
+        ts = None
+        if ts_str:
             try:
-                step_time = datetime.fromisoformat(timestamp_str.replace("Z", ""))
+                ts = datetime.fromisoformat(ts_str.replace("Z", ""))
             except ValueError:
                 pass
-
-        steps.append(
-            {
-                "action_number": action_num,
-                "timestamp": step_time,
-                "description": description,
-            }
-        )
-
-    return steps
+        steps.append({"step_number": num, "timestamp": ts, "application": app, "description": desc, "action": act})
+    return mhtml, steps
 
 
-def match_segments_to_steps(
-    segments: list[dict], steps: list[dict], recording_start: datetime
-) -> dict[int, str]:
-    """Match voice transcript segments to PSR steps by timestamp proximity."""
-    step_comments = {}
-
+def match_voice_to_steps(segments, steps):
+    """Match transcript segments to steps. Returns {step_number: narration}."""
     if not steps or not segments:
-        return step_comments
-
-    for step in steps:
-        if step["timestamp"] is None:
-            continue
-
-        # Calculate offset of this step from recording start
-        step_offset = (step["timestamp"] - recording_start).total_seconds()
-
-        # Find the transcript segment(s) closest to this step's time
-        matching_texts = []
-        for seg in segments:
-            # Match if the segment overlaps with a window around the step
-            # (voice usually comes slightly before or during the action)
-            if seg["start"] - 3 <= step_offset <= seg["end"] + 5:
-                matching_texts.append(seg["text"])
-
-        if matching_texts:
-            step_comments[step["action_number"]] = " ".join(matching_texts)
-
-    return step_comments
-
-
-def fallback_distribute_segments(
-    segments: list[dict], step_count: int
-) -> dict[int, str]:
-    """If timestamps don't work, distribute segments evenly across steps."""
-    step_comments = {}
-    if not segments or step_count == 0:
-        return step_comments
-
-    # Group segments into step_count buckets
-    segs_per_step = max(1, len(segments) // step_count)
-    for i in range(step_count):
-        start_idx = i * segs_per_step
-        end_idx = min(start_idx + segs_per_step, len(segments))
-        if i == step_count - 1:
-            end_idx = len(segments)
-        texts = [s["text"] for s in segments[start_idx:end_idx]]
+        return {}
+    # Try timestamp matching
+    if steps[0]["timestamp"]:
+        start = steps[0]["timestamp"]
+        comments = {}
+        for step in steps:
+            if not step["timestamp"]:
+                continue
+            offset = (step["timestamp"] - start).total_seconds()
+            texts = [s["text"] for s in segments if s["start"] - 3 <= offset <= s["end"] + 5]
+            if texts:
+                comments[step["step_number"]] = " ".join(texts)
+        if len(comments) >= len(steps) // 2:
+            return comments
+    # Fallback: distribute evenly
+    comments = {}
+    per = max(1, len(segments) // len(steps))
+    for i, step in enumerate(steps):
+        si = i * per
+        ei = min(si + per, len(segments)) if i < len(steps) - 1 else len(segments)
+        texts = [s["text"] for s in segments[si:ei]]
         if texts:
-            step_comments[i + 1] = " ".join(texts)
-
-    return step_comments
-
-
-def inject_comments_into_mhtml(
-    mhtml_content: str, step_comments: dict[int, str]
-) -> str:
-    """Inject voice transcript as comments into the PSR MHTML content."""
-    # PSR MHTML has step divs like: <div id="Step1">
-    # We inject comment text after the step description
-
-    for step_num, comment_text in step_comments.items():
-        # Clean the comment text for HTML
-        safe_comment = (
-            comment_text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
-        )
-
-        # Pattern: find the step div and add comment after description
-        # PSR format: <div id="StepN">...<br/>...<br/>
-        step_id = f"Step{step_num}"
-
-        # Check if comment already exists for this step
-        if f'id="{step_id}"' in mhtml_content:
-            # Find the step div closing </div> and inject before it
-            pattern = f'(id="{step_id}".*?)(</div>)'
-            replacement = f"\\1<br/><b>Comment: </b>{safe_comment}\\2"
-            mhtml_content = re.sub(pattern, replacement, mhtml_content, count=1, flags=re.DOTALL)
-
-    return mhtml_content
+            comments[step["step_number"]] = " ".join(texts)
+    return comments
 
 
-def create_enriched_zip(
-    original_zip_path: str, modified_mhtml: str, output_zip_path: str
-):
-    """Create a new ZIP with the modified MHTML content."""
-    with zipfile.ZipFile(original_zip_path, "r") as original:
-        with zipfile.ZipFile(output_zip_path, "w", zipfile.ZIP_DEFLATED) as new_zip:
-            for item in original.namelist():
-                if item.lower().endswith(".mht") or item.lower().endswith(".mhtml"):
-                    new_zip.writestr(item, modified_mhtml)
-                else:
-                    new_zip.writestr(item, original.read(item))
+def build_workflow_json(request, steps, voice_comments, segments, audio_path, zip_path):
+    """Build a tool-agnostic workflow JSON."""
+    ws = []
+    for step in steps:
+        w = {
+            "step_number": step["step_number"],
+            "description": step["description"],
+            "action": step["action"],
+            "application": step["application"],
+            "voice_narration": voice_comments.get(step["step_number"], ""),
+        }
+        if step["timestamp"]:
+            w["timestamp"] = step["timestamp"].isoformat()
+        ws.append(w)
+
+    browser_apps = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"}
+    apps = {s["application"].lower() for s in steps if s["application"]}
+    is_browser = bool(apps & browser_apps)
+    all_text = " ".join([s["description"] for s in steps] + list(voice_comments.values()))
+    urls = sorted(set(re.findall(r'https?://[^\s<>"]+', all_text)))
+
+    return {
+        "version": "1.0",
+        "request": request,
+        "recorded_at": datetime.now().isoformat(),
+        "source_files": {"psr_zip": os.path.abspath(zip_path), "audio": os.path.abspath(audio_path)},
+        "metadata": {
+            "total_steps": len(ws),
+            "applications": sorted(apps),
+            "is_browser_workflow": is_browser,
+            "urls_detected": urls,
+            "recommended_engine": "tars" if is_browser else "ufo",
+        },
+        "full_transcript": [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in segments],
+        "steps": ws,
+    }
+
+
+def inject_comments_into_mhtml(mhtml, comments):
+    """Inject voice as comments into PSR MHTML for UFO."""
+    for num, text in comments.items():
+        safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        sid = "Step%d" % num
+        if ('id="%s"' % sid) in mhtml:
+            pattern = '(id="%s".*?)(</div>)' % sid
+            replacement = "\\1<br/><b>Comment: </b>%s\\2" % safe
+            mhtml = re.sub(pattern, replacement, mhtml, count=1, flags=re.DOTALL)
+    return mhtml
+
+
+def generate_tars_commands(workflow):
+    """Generate Agent TARS CLI commands from workflow."""
+    cmds = []
+    if workflow["metadata"]["is_browser_workflow"]:
+        descs = []
+        for s in workflow["steps"]:
+            t = s.get("voice_narration") or s.get("description", "")
+            if t:
+                descs.append(t)
+        if descs:
+            compound = ". Then, ".join(descs[:10])
+            cmds.append('agent-tars run --input "%s" --format json' % compound)
+    if not cmds:
+        cmds.append('agent-tars run --input "%s" --format json' % workflow["request"])
+    return cmds
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Merge voice narration with Windows Steps Recorder output"
-    )
-    parser.add_argument(
-        "--zip", "-z", required=True, help="Path to PSR ZIP file"
-    )
-    parser.add_argument(
-        "--audio", "-a", required=True, help="Path to audio WAV file"
-    )
-    parser.add_argument(
-        "--request", "-r", required=True, help="Description of the workflow"
-    )
-    parser.add_argument(
-        "--output", "-o", help="Output enriched ZIP path (default: adds _enriched)"
-    )
-    parser.add_argument(
-        "--api-key", help="OpenAI API key (or set OPENAI_API_KEY env var)"
-    )
-    parser.add_argument(
-        "--feed-ufo",
-        action="store_true",
-        help="Automatically feed the enriched recording to UFO record_processor",
-    )
-    parser.add_argument(
-        "--ufo-dir", default="C:\\UFO", help="Path to UFO installation"
-    )
+    p = argparse.ArgumentParser(description="Workflow Recorder: voice + Steps Recorder -> universal format")
+    p.add_argument("--zip", "-z", required=True, help="PSR ZIP file")
+    p.add_argument("--audio", "-a", required=True, help="Audio WAV file")
+    p.add_argument("--request", "-r", required=True, help="Workflow description")
+    p.add_argument("--output-dir", "-o", help="Output directory")
+    p.add_argument("--api-key", help="OpenAI API key")
+    p.add_argument("--feed-ufo", action="store_true", help="Feed to UFO")
+    p.add_argument("--feed-tars", action="store_true", help="Run via TARS")
+    p.add_argument("--ufo-dir", default="C:\\UFO", help="UFO path")
+    args = p.parse_args()
 
-    args = parser.parse_args()
-
-    if not os.path.exists(args.zip):
-        print(f"ERROR: ZIP file not found: {args.zip}")
-        sys.exit(1)
-    if not os.path.exists(args.audio):
-        print(f"ERROR: Audio file not found: {args.audio}")
-        sys.exit(1)
-
-    output_path = args.output
-    if not output_path:
-        base = os.path.splitext(args.zip)[0]
-        output_path = base + "_enriched.zip"
-
-    # Step 1: Transcribe audio
-    print(f"\n[1/4] Transcribing audio: {args.audio}")
-    segments = transcribe_audio(args.audio, args.api_key)
-    print(f"      Found {len(segments)} transcript segments")
-    for seg in segments[:5]:
-        print(f"      [{seg['start']:.1f}s] {seg['text'][:80]}")
-    if len(segments) > 5:
-        print(f"      ... and {len(segments) - 5} more")
-
-    # Step 2: Read PSR ZIP
-    print(f"\n[2/4] Reading Steps Recorder file: {args.zip}")
-    with zipfile.ZipFile(args.zip, "r") as zf:
-        mht_files = [n for n in zf.namelist() if n.lower().endswith((".mht", ".mhtml"))]
-        if not mht_files:
-            print("ERROR: No .mht file found in ZIP")
+    for f in [args.zip, args.audio]:
+        if not os.path.exists(f):
+            print("ERROR: Not found: " + f)
             sys.exit(1)
-        mhtml_content = zf.read(mht_files[0]).decode("utf-8", errors="replace")
 
-    psr_steps = parse_psr_step_times(mhtml_content)
-    print(f"      Found {len(psr_steps)} steps in PSR recording")
+    out_dir = args.output_dir or os.path.dirname(os.path.abspath(args.zip))
+    base = os.path.splitext(os.path.basename(args.zip))[0]
+    os.makedirs(out_dir, exist_ok=True)
 
-    # Step 3: Match voice to steps
-    print("\n[3/4] Matching voice to steps...")
-    step_comments = {}
+    # 1. Transcribe
+    print("\n[1/5] Transcribing audio...")
+    segments = transcribe_audio(args.audio, args.api_key)
+    print("      %d segments" % len(segments))
 
-    if psr_steps and psr_steps[0]["timestamp"]:
-        recording_start = psr_steps[0]["timestamp"]
-        step_comments = match_segments_to_steps(segments, psr_steps, recording_start)
-        print(f"      Matched {len(step_comments)} steps by timestamp")
-    
-    # Fallback: if timestamp matching got few results, distribute evenly
-    if len(step_comments) < len(psr_steps) // 2:
-        print("      Timestamp matching insufficient, distributing segments evenly...")
-        step_comments = fallback_distribute_segments(segments, len(psr_steps))
-        print(f"      Distributed to {len(step_comments)} steps")
+    # 2. Parse PSR
+    print("\n[2/5] Parsing Steps Recorder...")
+    mhtml, psr_steps = parse_psr_zip(args.zip)
+    print("      %d steps" % len(psr_steps))
 
-    # Show matches
-    for step_num, text in sorted(step_comments.items()):
-        print(f"      Step {step_num}: {text[:80]}...")
+    # 3. Match
+    print("\n[3/5] Matching voice to steps...")
+    comments = match_voice_to_steps(segments, psr_steps)
+    print("      %d/%d matched" % (len(comments), len(psr_steps)))
 
-    # Step 4: Inject comments and save
-    print(f"\n[4/4] Injecting voice comments into PSR file...")
-    modified_mhtml = inject_comments_into_mhtml(mhtml_content, step_comments)
-    create_enriched_zip(args.zip, modified_mhtml, output_path)
-    print(f"      Saved enriched recording: {output_path}")
+    # 4. Workflow JSON (universal)
+    print("\n[4/5] Building workflow.json...")
+    workflow = build_workflow_json(args.request, psr_steps, comments, segments, args.audio, args.zip)
+    wf_path = os.path.join(out_dir, base + "_workflow.json")
+    with open(wf_path, "w", encoding="utf-8") as f:
+        json.dump(workflow, f, indent=2, ensure_ascii=False)
+    engine = workflow["metadata"]["recommended_engine"]
+    print("      Saved: " + wf_path)
+    print("      Recommended engine: " + engine.upper())
 
-    # Full transcript saved separately for reference
-    transcript_path = os.path.splitext(output_path)[0] + "_transcript.txt"
-    with open(transcript_path, "w", encoding="utf-8") as f:
-        f.write(f"Request: {args.request}\n")
-        f.write(f"Audio: {args.audio}\n")
-        f.write(f"Steps: {args.zip}\n\n")
-        f.write("Full Transcript:\n")
-        for seg in segments:
-            f.write(f"[{seg['start']:.1f}s - {seg['end']:.1f}s] {seg['text']}\n")
-        f.write(f"\nStep-Comment Mapping:\n")
-        for step_num, text in sorted(step_comments.items()):
-            f.write(f"  Step {step_num}: {text}\n")
-    print(f"      Transcript saved: {transcript_path}")
+    # 5. Engine-specific outputs
+    print("\n[5/5] Generating engine outputs...")
 
-    # Optionally feed to UFO
+    # UFO: enriched PSR ZIP
+    enriched = inject_comments_into_mhtml(mhtml, comments)
+    ez_path = os.path.join(out_dir, base + "_enriched.zip")
+    with zipfile.ZipFile(args.zip, "r") as orig:
+        with zipfile.ZipFile(ez_path, "w", zipfile.ZIP_DEFLATED) as nz:
+            for item in orig.namelist():
+                if item.lower().endswith((".mht", ".mhtml")):
+                    nz.writestr(item, enriched)
+                else:
+                    nz.writestr(item, orig.read(item))
+    print("      UFO:  " + ez_path)
+
+    # TARS: replay script
+    tars_cmds = generate_tars_commands(workflow)
+    tars_path = os.path.join(out_dir, base + "_tars_replay.bat")
+    with open(tars_path, "w") as f:
+        f.write("@echo off\nREM Replay: %s\n\n" % args.request)
+        for c in tars_cmds:
+            f.write(c + "\n")
+    print("      TARS: " + tars_path)
+
+    # Transcript
+    tx_path = os.path.join(out_dir, base + "_transcript.txt")
+    with open(tx_path, "w", encoding="utf-8") as f:
+        f.write("Request: %s\n\n" % args.request)
+        for s in segments:
+            f.write("[%.1fs] %s\n" % (s["start"], s["text"]))
+    print("      Text: " + tx_path)
+
+    # Feed UFO
     if args.feed_ufo:
-        print(f"\n[*] Feeding to UFO record_processor...")
-        ufo_python = os.path.join(args.ufo_dir, ".venv", "Scripts", "python.exe")
-        if not os.path.exists(ufo_python):
-            ufo_python = "python"
-        
-        import subprocess
-        cmd = [
-            ufo_python, "-m", "record_processor",
-            "-r", args.request,
-            "-p", output_path,
-        ]
-        print(f"    Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=args.ufo_dir)
-        if result.returncode != 0:
-            print(f"    WARNING: record_processor exited with code {result.returncode}")
+        print("\n[*] Feeding to UFO...")
+        ufo_py = os.path.join(args.ufo_dir, ".venv", "Scripts", "python.exe")
+        if not os.path.exists(ufo_py):
+            ufo_py = "python"
+        subprocess.run([ufo_py, "-m", "record_processor", "-r", args.request, "-p", ez_path], cwd=args.ufo_dir)
 
-    print("\n  Done!")
-    print(f"  Enriched ZIP: {output_path}")
-    print(f"  Transcript:   {transcript_path}")
-    if not args.feed_ufo:
-        print(f"\n  To feed to UFO:")
-        print(f"    cd {args.ufo_dir}")
-        venv_py = os.path.join(args.ufo_dir, ".venv", "Scripts", "python.exe")
-        print(f"    {venv_py} -m record_processor -r \"{args.request}\" -p \"{output_path}\"")
-    print()
+    # Feed TARS
+    if args.feed_tars:
+        print("\n[*] Running via Agent TARS...")
+        for c in tars_cmds:
+            subprocess.run(c, shell=True)
+
+    # Summary
+    print("\n  ============================================")
+    print("  Workflow Recording Complete")
+    print("  ============================================")
+    print("  Request:     " + args.request)
+    print("  Steps:       %d" % len(psr_steps))
+    print("  Engine:      %s recommended" % engine.upper())
+    print("")
+    print("  Universal:   " + wf_path)
+    print("  UFO format:  " + ez_path)
+    print("  TARS format: " + tars_path)
+    print("  Transcript:  " + tx_path)
+    print("")
 
 
 if __name__ == "__main__":

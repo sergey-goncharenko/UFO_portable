@@ -17,7 +17,8 @@ param(
     [string]$Model = "gpt-4o",
     [string]$PythonVersion = "3.11.9",
     [string]$AnyDeskPassword = "UfoDemo2026!",
-    [switch]$SkipAnyDesk
+    [switch]$SkipAnyDesk,
+    [switch]$SkipTars
 )
 
 $ErrorActionPreference = "Stop"
@@ -411,6 +412,54 @@ if (-not $SkipAnyDesk) {
 }
 
 # ──────────────────────────────────────────────────────────────
+# 6b. Install Agent TARS CLI (browser automation)
+# ──────────────────────────────────────────────────────────────
+$tarsVersion = $null
+if (-not $SkipTars) {
+    Write-Step 'Installing Agent TARS CLI (browser automation)...'
+    
+    # Check Node.js
+    $nodeOk = $false
+    try {
+        $nodeVer = cmd /c 'node --version 2>&1'
+        if ($nodeVer -match 'v(\d+)' -and [int]$Matches[1] -ge 22) {
+            Write-Ok ('Node.js ' + $nodeVer + ' found')
+            $nodeOk = $true
+        }
+    } catch {}
+    
+    if (-not $nodeOk) {
+        Write-Host '    Installing Node.js 22...'
+        $nodeInstaller = Join-Path $env:TEMP 'node-installer.msi'
+        try {
+            Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.16.0/node-v22.16.0-x64.msi' -OutFile $nodeInstaller -UseBasicParsing
+            Start-Process msiexec.exe -ArgumentList '/i', $nodeInstaller, '/quiet', '/norestart' -Wait -NoNewWindow
+            $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
+            Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+            $nodeVer = cmd /c 'node --version 2>&1'
+            Write-Ok ('Installed Node.js ' + $nodeVer)
+            $nodeOk = $true
+        } catch {
+            Write-Warn ('Node.js install failed: ' + $_.Exception.Message)
+        }
+    }
+    
+    if ($nodeOk) {
+        Write-Host '    Installing @agent-tars/cli...'
+        cmd /c 'npm install @agent-tars/cli@latest -g 2>&1' | Out-Null
+        $tarsCheck = cmd /c 'agent-tars --version 2>&1'
+        if ($tarsCheck -match '\d+\.\d+') {
+            $tarsVersion = $tarsCheck.Trim()
+            Write-Ok ('Agent TARS CLI v' + $tarsVersion)
+        } else {
+            Write-Warn 'Agent TARS CLI install may have failed. Run setup_tars.ps1 separately.'
+        }
+    }
+} else {
+    Write-Host '    Skipped (use without -SkipTars to install)'
+}
+
+# ──────────────────────────────────────────────────────────────
 # 7. Save deployment summary
 # ──────────────────────────────────────────────────────────────
 $hostname = $env:COMPUTERNAME
@@ -439,8 +488,15 @@ if ($anydeskId) {
     $summaryLines += ''
 }
 $summaryLines += '--- Quick Commands ---'
-$summaryLines += ('Interactive:  cd ' + $InstallDir + ' && .venv\Scripts\python.exe -m ufo --task demo')
-$summaryLines += ('One-shot:     cd ' + $InstallDir + ' && .venv\Scripts\python.exe -m ufo --task t1 -r "your command"')
+$summaryLines += ('UFO interactive:  cd ' + $InstallDir + ' && .venv\Scripts\python.exe -m ufo --task demo')
+$summaryLines += ('UFO one-shot:     cd ' + $InstallDir + ' && .venv\Scripts\python.exe -m ufo --task t1 -r "your command"')
+if ($tarsVersion) {
+    $summaryLines += ''
+    $summaryLines += '--- Agent TARS (Browser Automation) ---'
+    $summaryLines += ('Version:      v' + $tarsVersion)
+    $summaryLines += 'Interactive:  agent-tars'
+    $summaryLines += 'One-shot:     agent-tars run --input "search Google for weather"'
+}
 $summaryLines += ''
 $summaryLines += '=========================================='
 [IO.File]::WriteAllLines($summaryPath, $summaryLines)
@@ -471,6 +527,12 @@ Write-Host '  Or from terminal:' -ForegroundColor Green
 Write-Host ('    cd ' + $InstallDir) -ForegroundColor Green
 Write-Host '    .\ufo_interactive.bat' -ForegroundColor Green
 Write-Host '    .\ufo_run.bat Open Notepad and type Hello World' -ForegroundColor Green
+if ($tarsVersion) {
+    Write-Host '' -ForegroundColor Green
+    Write-Host '  Browser automation (Agent TARS):' -ForegroundColor Cyan
+    Write-Host '    agent-tars' -ForegroundColor Cyan
+    Write-Host '    agent-tars run --input "search Google for weather"' -ForegroundColor Cyan
+}
 Write-Host '' -ForegroundColor Green
 Write-Host ('  Logs saved to: ' + $InstallDir + '\logs') -ForegroundColor Green
 Write-Host ('  Full deployment info: ' + $summaryPath) -ForegroundColor Green

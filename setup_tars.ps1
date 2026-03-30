@@ -10,7 +10,8 @@
 #>
 param(
     [string]$ApiKey,
-    [string]$NodeVersion = "22"
+    [string]$NodeVersion = "22",
+    [string]$UserProfile = ""  # Override user profile path (for SYSTEM context)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,12 +100,16 @@ if (Test-Path $chromeExe) {
 # ── 4. Setup browser profile ────────────────────────────────
 Write-Step 'Setting up persistent browser profile...'
 
+# Resolve target profile (use -UserProfile if running as SYSTEM)
+$targetProfile = if ($UserProfile) { $UserProfile } else { $env:USERPROFILE }
+$targetLocalAppData = if ($UserProfile) { Join-Path $UserProfile 'AppData\Local' } else { $env:LOCALAPPDATA }
+
 # Create a dedicated Chrome profile directory for the agent
 $agentProfileDir = 'C:\tars_browser_profile'
 New-Item -ItemType Directory -Path $agentProfileDir -Force | Out-Null
 
 # Copy the user's existing Chrome profile (with cookies/logins) if it exists
-$userChromeProfile = Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data'
+$userChromeProfile = Join-Path $targetLocalAppData 'Google\Chrome\User Data'
 $profileReady = $false
 
 if (Test-Path $userChromeProfile) {
@@ -145,7 +150,7 @@ if (Test-Path $userChromeProfile) {
 # ── 5. Create configs (public + authenticated) ─────────────
 Write-Step 'Creating Agent TARS configs...'
 
-$tarsConfigDir = Join-Path $env:USERPROFILE '.agent-tars-workspace'
+$tarsConfigDir = Join-Path $targetProfile '.agent-tars-workspace'
 New-Item -ItemType Directory -Path $tarsConfigDir -Force | Out-Null
 
 if (-not $ApiKey -and $env:OPENAI_API_KEY) { $ApiKey = $env:OPENAI_API_KEY }

@@ -18,7 +18,8 @@ param(
     [string]$PythonVersion = "3.11.9",
     [string]$AnyDeskPassword = "UfoDemo2026!",
     [switch]$SkipAnyDesk,
-    [switch]$SkipTars
+    [switch]$SkipTars,
+    [string]$UserProfile = ""  # Override user profile path (for SYSTEM context)
 )
 
 $ErrorActionPreference = "Stop"
@@ -324,25 +325,32 @@ $lines += "${q}${venvPath}\Scripts\python.exe${q} -m ufo --task demo_%RANDOM% -r
 $batPath = Join-Path $InstallDir 'ufo_run.bat'
 [IO.File]::WriteAllLines($batPath, $lines)
 
-# Desktop shortcuts
-$desktop = [Environment]::GetFolderPath("Desktop")
-$shell = New-Object -ComObject WScript.Shell
+# Desktop shortcuts (skip if running as SYSTEM with no desktop)
+$desktop = [Environment]::GetFolderPath('Desktop')
+if (-not $desktop -and $UserProfile) {
+    $desktop = Join-Path $UserProfile 'Desktop'
+}
+if ($desktop -and (Test-Path $desktop)) {
+    $shell = New-Object -ComObject WScript.Shell
 
-$lnkPath = Join-Path $desktop 'UFO2 Interactive.lnk'
-$shortcut = $shell.CreateShortcut($lnkPath)
-$shortcut.TargetPath = Join-Path $InstallDir 'ufo_interactive.bat'
-$shortcut.WorkingDirectory = $InstallDir
-$shortcut.IconLocation = "shell32.dll,12"
-$shortcut.Description = "Launch UFO2 in interactive mode"
-$shortcut.Save()
+    $lnkPath = Join-Path $desktop 'UFO2 Interactive.lnk'
+    $shortcut = $shell.CreateShortcut($lnkPath)
+    $shortcut.TargetPath = Join-Path $InstallDir 'ufo_interactive.bat'
+    $shortcut.WorkingDirectory = $InstallDir
+    $shortcut.IconLocation = 'shell32.dll,12'
+    $shortcut.Description = 'Launch UFO2 in interactive mode'
+    $shortcut.Save()
 
-$lnkPath = Join-Path $desktop 'UFO2 Folder.lnk'
-$shortcut = $shell.CreateShortcut($lnkPath)
-$shortcut.TargetPath = $InstallDir
-$shortcut.Description = "Open UFO2 installation folder"
-$shortcut.Save()
+    $lnkPath = Join-Path $desktop 'UFO2 Folder.lnk'
+    $shortcut = $shell.CreateShortcut($lnkPath)
+    $shortcut.TargetPath = $InstallDir
+    $shortcut.Description = 'Open UFO2 installation folder'
+    $shortcut.Save()
 
-Write-Ok "Created ufo_interactive.bat, ufo_run.bat, and desktop shortcuts"
+    Write-Ok 'Created ufo_interactive.bat, ufo_run.bat, and desktop shortcuts'
+} else {
+    Write-Warn 'No desktop folder available (running as SYSTEM?), skipping shortcuts'
+}
 
 Pop-Location
 

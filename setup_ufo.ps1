@@ -458,10 +458,40 @@ if (-not $SkipTars) {
         Write-Host '    Installing @agent-tars/cli...'
         cmd /c 'npm install @agent-tars/cli@latest -g 2>&1' | Out-Null
         
-        # Ensure npm global bin is in PATH (npm installs to %APPDATA%\npm)
-        $npmBin = Join-Path $env:APPDATA 'npm'
-        if ($npmBin -and (Test-Path $npmBin) -and $env:Path -notmatch [regex]::Escape($npmBin)) {
-            $env:Path += ';' + $npmBin
+        # Find the actual npm global bin dir (may be SYSTEM profile or user profile)
+        $npmBin = $null
+        $npmPrefixResult = cmd /c 'npm prefix -g 2>&1'
+        if ($npmPrefixResult -and (Test-Path $npmPrefixResult.Trim())) {
+            $npmBin = $npmPrefixResult.Trim()
+        }
+        # Fallback: check common locations
+        if (-not $npmBin -or -not (Test-Path $npmBin)) {
+            $candidates = @(
+                (Join-Path $env:APPDATA 'npm'),
+                'C:\windows\system32\config\systemprofile\AppData\Roaming\npm',
+                (Join-Path $env:ProgramFiles 'nodejs')
+            )
+            if ($UserProfile) {
+                $candidates = @((Join-Path $UserProfile 'AppData\Roaming\npm')) + $candidates
+            }
+            foreach ($c in $candidates) {
+                if (Test-Path (Join-Path $c 'agent-tars.cmd')) {
+                    $npmBin = $c
+                    break
+                }
+                if (Test-Path (Join-Path $c 'agent-tars')) {
+                    $npmBin = $c
+                    break
+                }
+            }
+        }
+        
+        if ($npmBin) {
+            Write-Host ('    npm global bin: ' + $npmBin) -ForegroundColor DarkGray
+            # Add to current session
+            if ($env:Path -notmatch [regex]::Escape($npmBin)) {
+                $env:Path += ';' + $npmBin
+            }
         }
         
         $tarsCheck = cmd /c 'agent-tars --version 2>&1'
@@ -469,18 +499,21 @@ if (-not $SkipTars) {
             $tarsVersion = $tarsCheck.Trim()
             Write-Ok ('Agent TARS CLI v' + $tarsVersion)
             
-            # Persist npm bin in system PATH so it works in new terminals
-            $machinePath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
-            if ($machinePath -notmatch [regex]::Escape($npmBin)) {
-                try {
-                    [System.Environment]::SetEnvironmentVariable('Path', $machinePath + ';' + $npmBin, 'Machine')
-                    Write-Ok ('Added ' + $npmBin + ' to system PATH')
-                } catch {
-                    Write-Warn ('Could not add npm to system PATH. Add manually: ' + $npmBin)
+            # Persist npm bin in system PATH so it works for all users/terminals
+            if ($npmBin) {
+                $machinePath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+                if ($machinePath -notmatch [regex]::Escape($npmBin)) {
+                    try {
+                        [System.Environment]::SetEnvironmentVariable('Path', $machinePath + ';' + $npmBin, 'Machine')
+                        Write-Ok ('Added ' + $npmBin + ' to system PATH')
+                    } catch {
+                        Write-Warn ('Could not add npm to system PATH. Add manually: ' + $npmBin)
+                    }
                 }
             }
         } else {
             Write-Warn 'Agent TARS CLI install may have failed. Run setup_tars.ps1 separately.'
+            if ($npmBin) { Write-Warn ('Check: ' + $npmBin) }
         }
     }
 } else {

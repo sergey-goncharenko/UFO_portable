@@ -25,6 +25,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
 # --- Colors ---
 function Write-Step($msg) { Write-Host "`n[*] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    OK: $msg" -ForegroundColor Green }
@@ -511,13 +513,111 @@ $summaryLines += '=========================================='
 Write-Ok ('Deployment info saved to ' + $summaryPath)
 
 # ──────────────────────────────────────────────────────────────
-# Done!
+# 8. Post-install smoke tests
 # ──────────────────────────────────────────────────────────────
-Write-Host '' -ForegroundColor Green
-Write-Host '  ============================================' -ForegroundColor Green
-Write-Host '   UFO2 is ready!' -ForegroundColor Green
-Write-Host '  ============================================' -ForegroundColor Green
-Write-Host '' -ForegroundColor Green
+Write-Step 'Running post-install smoke tests...'
+
+$testsPassed = 0
+$testsFailed = 0
+$testResults = @()
+
+# Test 1: Python version in venv
+$pyVer = cmd /c ($venvPython + ' --version 2>&1')
+if ($pyVer -match 'Python 3\.(1[0-2])') {
+    $testsPassed++
+    $testResults += '  [PASS] Python: ' + $pyVer.Trim()
+} else {
+    $testsFailed++
+    $testResults += '  [FAIL] Python: got ' + $pyVer.Trim() + ' (need 3.10-3.12)'
+}
+
+# Test 2: UFO module imports
+$ufoImport = cmd /c ($venvPython + ' -c "from ufo import ufo; print(''OK'')" 2>&1')
+if ($ufoImport -match 'OK') {
+    $testsPassed++
+    $testResults += '  [PASS] UFO module imports successfully'
+} else {
+    $testsFailed++
+    $testResults += '  [FAIL] UFO module import failed'
+}
+
+# Test 3: UFO CLI responds
+$ufoHelp = cmd /c ("cd /d $InstallDir && $venvPython -m ufo --help 2>&1")
+if ($ufoHelp -match 'task|usage|options') {
+    $testsPassed++
+    $testResults += '  [PASS] UFO CLI responds to --help'
+} else {
+    $testsFailed++
+    $testResults += '  [FAIL] UFO CLI --help failed'
+}
+
+# Test 4: Config file exists and has API key
+$configTest = Join-Path $InstallDir 'config\ufo\agents.yaml'
+if (Test-Path $configTest) {
+    $cfgContent = Get-Content $configTest -Raw
+    if ($cfgContent -match 'API_KEY' -and $cfgContent -notmatch 'YOUR_KEY_HERE') {
+        $testsPassed++
+        $testResults += '  [PASS] Config: agents.yaml has API key configured'
+    } else {
+        $testsFailed++
+        $testResults += '  [FAIL] Config: API key not set in agents.yaml'
+    }
+} else {
+    $testsFailed++
+    $testResults += '  [FAIL] Config: agents.yaml not found'
+}
+
+# Test 5: Agent TARS CLI (if installed)
+if ($tarsVersion) {
+    $tarsHelp = cmd /c 'agent-tars --help 2>&1'
+    if ($tarsHelp -match 'agent-tars|Usage|Commands') {
+        $testsPassed++
+        $testResults += '  [PASS] Agent TARS CLI responds (v' + $tarsVersion + ')'
+    } else {
+        $testsFailed++
+        $testResults += '  [FAIL] Agent TARS CLI --help failed'
+    }
+    
+    # Test 6: Node.js version
+    $nodeVer = cmd /c 'node --version 2>&1'
+    if ($nodeVer -match 'v(\d+)' -and [int]$Matches[1] -ge 22) {
+        $testsPassed++
+        $testResults += '  [PASS] Node.js: ' + $nodeVer.Trim()
+    } else {
+        $testsFailed++
+        $testResults += '  [FAIL] Node.js: got ' + $nodeVer.Trim() + ' (need v22+)'
+    }
+}
+
+# Test 7: Batch launchers exist
+$interactiveBat = Join-Path $InstallDir 'ufo_interactive.bat'
+$runBat = Join-Path $InstallDir 'ufo_run.bat'
+if ((Test-Path $interactiveBat) -and (Test-Path $runBat)) {
+    $testsPassed++
+    $testResults += '  [PASS] Launcher scripts created'
+} else {
+    $testsFailed++
+    $testResults += '  [FAIL] Launcher scripts missing'
+}
+
+# Print test results
+Write-Host ''
+foreach ($r in $testResults) {
+    $color = if ($r -match '\[PASS\]') { 'Green' } else { 'Red' }
+    Write-Host $r -ForegroundColor $color
+}
+Write-Host ''
+$totalTests = $testsPassed + $testsFailed
+Write-Host ('  Tests: ' + $testsPassed + '/' + $totalTests + ' passed') -ForegroundColor $(if ($testsFailed -eq 0) { 'Green' } else { 'Yellow' })
+
+# ──────────────────────────────────────────────────────────────
+# 9. Print full usage examples
+# ──────────────────────────────────────────────────────────────
+Write-Host '' -ForegroundColor Cyan
+Write-Host '  ============================================' -ForegroundColor Cyan
+Write-Host '   SETUP COMPLETE' -ForegroundColor Cyan
+Write-Host '  ============================================' -ForegroundColor Cyan
+Write-Host ''
 Write-Host ('  Hostname:   ' + $hostname) -ForegroundColor Green
 Write-Host ('  IP:         ' + $ipAddr) -ForegroundColor Green
 if ($anydeskId) {
@@ -525,24 +625,61 @@ if ($anydeskId) {
     Write-Host '  --- AnyDesk (View-Only Monitoring) ---' -ForegroundColor Yellow
     Write-Host ('  AnyDesk ID: ' + $anydeskId) -ForegroundColor Yellow
     Write-Host ('  Password:   ' + $AnyDeskPassword) -ForegroundColor Yellow
-    Write-Host '  Tip: Connect with "View Only" to watch agent without interfering' -ForegroundColor Yellow
 }
-Write-Host '' -ForegroundColor Green
-Write-Host '  Quick start:' -ForegroundColor Green
-Write-Host '    Double-click UFO2 Interactive on Desktop' -ForegroundColor Green
-Write-Host '' -ForegroundColor Green
-Write-Host '  Or from terminal:' -ForegroundColor Green
-Write-Host ('    cd ' + $InstallDir) -ForegroundColor Green
-Write-Host '    .\ufo_interactive.bat' -ForegroundColor Green
-Write-Host '    .\ufo_run.bat Open Notepad and type Hello World' -ForegroundColor Green
+Write-Host '' -ForegroundColor Cyan
+Write-Host '  ========== UFO2 USAGE (Desktop) ==========' -ForegroundColor Cyan
+Write-Host '' -ForegroundColor White
+Write-Host '  # Interactive mode (type commands one at a time):' -ForegroundColor DarkGray
+Write-Host ('  cd ' + $InstallDir) -ForegroundColor White
+Write-Host ('  ' + $venvPython + ' -m ufo --task demo') -ForegroundColor White
+Write-Host '' -ForegroundColor White
+Write-Host '  # One-shot command:' -ForegroundColor DarkGray
+Write-Host ('  cd ' + $InstallDir) -ForegroundColor White
+Write-Host ('  ' + $venvPython + ' -m ufo --task notepad1 -r "Open Notepad and type Hello World"') -ForegroundColor White
+Write-Host '' -ForegroundColor White
+Write-Host '  # One-shot with clean result output:' -ForegroundColor DarkGray
+Write-Host ('  ' + $venvPython + ' ' + $scriptDir + '\ufo_run_clean.py -r "Open Notepad and type Hello" -t test1 --ufo-dir ' + $InstallDir) -ForegroundColor White
+Write-Host '' -ForegroundColor White
+Write-Host '  # Using batch launcher:' -ForegroundColor DarkGray
+Write-Host ('  ' + (Join-Path $InstallDir 'ufo_run.bat') + ' "Open Calculator and compute 2+2"') -ForegroundColor White
+
 if ($tarsVersion) {
-    Write-Host '' -ForegroundColor Green
-    Write-Host '  Browser automation (Agent TARS):' -ForegroundColor Cyan
-    Write-Host '    agent-tars' -ForegroundColor Cyan
-    Write-Host '    agent-tars run --input "search Google for weather"' -ForegroundColor Cyan
+    Write-Host '' -ForegroundColor Cyan
+    Write-Host '  ======= AGENT TARS USAGE (Browser) =======' -ForegroundColor Cyan
+    Write-Host '' -ForegroundColor White
+    Write-Host '  # Interactive mode (opens Web UI at localhost:8888):' -ForegroundColor DarkGray
+    Write-Host '  agent-tars' -ForegroundColor White
+    Write-Host '' -ForegroundColor White
+    Write-Host '  # One-shot browser task:' -ForegroundColor DarkGray
+    Write-Host '  agent-tars run --input "Search Google for best CRM for small business" --format text' -ForegroundColor White
+    Write-Host '' -ForegroundColor White
+    Write-Host '  # With specific model:' -ForegroundColor DarkGray
+    Write-Host '  agent-tars run --model.provider openai --model.id gpt-4o-mini --input "Go to wikipedia.org and find population of Tokyo"' -ForegroundColor White
 }
-Write-Host '' -ForegroundColor Green
-Write-Host ('  Logs saved to: ' + $InstallDir + '\logs') -ForegroundColor Green
-Write-Host ('  Full deployment info: ' + $summaryPath) -ForegroundColor Green
-Write-Host '  ============================================' -ForegroundColor Green
+
+Write-Host '' -ForegroundColor Cyan
+Write-Host '  ========== BENCHMARKING ==========' -ForegroundColor Cyan
+Write-Host '' -ForegroundColor White
+Write-Host '  # Run evaluation pipeline (all engines):' -ForegroundColor DarkGray
+Write-Host ('  cd ' + $scriptDir) -ForegroundColor White
+Write-Host ('  powershell -ExecutionPolicy Bypass -File eval_pipeline.ps1 -ApiKey "YOUR_KEY" -Engine all -UfoDir ' + $InstallDir) -ForegroundColor White
+Write-Host '' -ForegroundColor White
+Write-Host '  # Desktop-only benchmark:' -ForegroundColor DarkGray
+Write-Host ('  powershell -ExecutionPolicy Bypass -File eval_pipeline.ps1 -ApiKey "YOUR_KEY" -Engine ufo -UfoDir ' + $InstallDir) -ForegroundColor White
+Write-Host '' -ForegroundColor White
+Write-Host '  # View leaderboard:' -ForegroundColor DarkGray
+Write-Host ('  powershell -ExecutionPolicy Bypass -File eval_pipeline.ps1 -ShowResults') -ForegroundColor White
+
+Write-Host '' -ForegroundColor Cyan
+Write-Host '  ========== WORKFLOW RECORDING ==========' -ForegroundColor Cyan
+Write-Host '' -ForegroundColor White
+Write-Host '  # Record a workflow (Steps Recorder + microphone):' -ForegroundColor DarkGray
+Write-Host ('  cd ' + $scriptDir) -ForegroundColor White
+Write-Host ('  powershell -ExecutionPolicy Bypass -File start_recording.ps1 -Name "my_workflow"') -ForegroundColor White
+Write-Host '' -ForegroundColor White
+Write-Host '  # Merge voice + steps and feed to UFO:' -ForegroundColor DarkGray
+Write-Host ('  ' + $venvPython + ' ' + $scriptDir + '\merge_voice_recording.py --zip recording.zip --audio recording_audio.wav -r "workflow description" --feed-ufo --ufo-dir ' + $InstallDir) -ForegroundColor White
+Write-Host '' -ForegroundColor Cyan
+Write-Host ('  Full deployment info: ' + $summaryPath) -ForegroundColor DarkGray
+Write-Host '  ============================================' -ForegroundColor Cyan
 Write-Host ''

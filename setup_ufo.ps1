@@ -457,10 +457,28 @@ if (-not $SkipTars) {
     if ($nodeOk) {
         Write-Host '    Installing @agent-tars/cli...'
         cmd /c 'npm install @agent-tars/cli@latest -g 2>&1' | Out-Null
+        
+        # Ensure npm global bin is in PATH (npm installs to %APPDATA%\npm)
+        $npmBin = Join-Path $env:APPDATA 'npm'
+        if ($npmBin -and (Test-Path $npmBin) -and $env:Path -notmatch [regex]::Escape($npmBin)) {
+            $env:Path += ';' + $npmBin
+        }
+        
         $tarsCheck = cmd /c 'agent-tars --version 2>&1'
         if ($tarsCheck -match '\d+\.\d+') {
             $tarsVersion = $tarsCheck.Trim()
             Write-Ok ('Agent TARS CLI v' + $tarsVersion)
+            
+            # Persist npm bin in system PATH so it works in new terminals
+            $machinePath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+            if ($machinePath -notmatch [regex]::Escape($npmBin)) {
+                try {
+                    [System.Environment]::SetEnvironmentVariable('Path', $machinePath + ';' + $npmBin, 'Machine')
+                    Write-Ok ('Added ' + $npmBin + ' to system PATH')
+                } catch {
+                    Write-Warn ('Could not add npm to system PATH. Add manually: ' + $npmBin)
+                }
+            }
         } else {
             Write-Warn 'Agent TARS CLI install may have failed. Run setup_tars.ps1 separately.'
         }
